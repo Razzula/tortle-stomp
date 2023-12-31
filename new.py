@@ -24,10 +24,8 @@ INPUTROOT = config['inputRoot']
 
 # MISC
 COMPRESSION_COMMENT = f'{COMPRESSION_TAG} (-c:v {VCODEC} -crf {CRF} -preset {PRESET} -c:a {ACODEC} -b:a {ABITRATE})'
-TURTLE_ASCII = '''       ________    ____
-      /  \__/  \  |  o |
-     |\__/  \__/|/ ___\|
-    < ___\__/___ _/     '''
+TURTLE_ASCII = ['      ________    ____\n      /  \__/  \  |  o |\n     |\__/  \__/|/ ___\|\n    < ___\__/___ _/     ',
+                '      ________    ____\n      /  \__/  \  |  x |\n     |\__/  \__/|/ ___\|\n    < ___\__/___ _/     ']
 POSES_ASCII = ['|_|_|  |_|_|', '|_|-/  |_|-/', '/-/_|  /-/_|']
 
 
@@ -50,22 +48,27 @@ class Window(tk.Tk):
         self.loop = loop
         self.root = tk.Tk()
 
+        self.root.title('tortle-stomp')
+
         self.animation = 0
         
-        self.turtleBody = tk.Label(text=TURTLE_ASCII, font=('Consolas', 8))
-        self.turtleBody.grid(row=0, columnspan=2, padx=(8, 8), pady=(16, 0))
+        self.turtleBody = tk.Label(text=TURTLE_ASCII[0], font=('Consolas', 8))
+        self.turtleBody.grid(row=0, columnspan=2, padx=(8, 8), pady=(8, 0))
 
         self.turtleLegs = tk.Label(text=POSES_ASCII[0], font=('Consolas', 8))
-        self.turtleLegs.grid(row=1, columnspan=2, padx=(8, 8), pady=(0, 0))
+        self.turtleLegs.grid(row=1, columnspan=2, padx=(8, 8), pady=(0, 4))
+
+        self.statusLabel = tk.Label(text='')
+        self.statusLabel.grid(row=2, columnspan=2, padx=(8, 8), pady=(0, 0))
         
         self.progressbar = ttk.Progressbar(length=280)
-        self.progressbar.grid(row=2, columnspan=2, padx=(8, 8), pady=(16, 0))
+        self.progressbar.grid(row=3, columnspan=2, padx=(8, 8), pady=(4, 0))
         
-        startButton = tk.Button(text="Start", width=10, command=lambda: self.loop.create_task(self.getNextFile()))
-        startButton.grid(row=3, column=1, sticky=tk.W, padx=8, pady=8)
+        self.startButton = tk.Button(text="Start", width=10, command=lambda: self.loop.create_task(self.handleStartAbortButtonClick()))
+        self.startButton.grid(row=4, column=0, sticky=tk.W, padx=8, pady=8)
 
-        # pauseButton = tk.Button(text="Pause", width=10, command=lambda: self.loop.create_task(self.TODO()))
-        # pauseButton.grid(row=3, column=2, sticky=tk.W, padx=8, pady=8)
+        self.pauseButton = tk.Button(text="Pause", width=10, command=lambda: None, state='disabled')
+        self.pauseButton.grid(row=4, column=1, sticky=tk.W, padx=8, pady=8)
 
         self.stream = asyncio.StreamReader()
 
@@ -80,12 +83,37 @@ class Window(tk.Tk):
 
     async def playAnimation(self): 
         while (self.isRunning):
-            self.turtleLegs["text"] = POSES_ASCII[self.animation]
+            self.turtleLegs['text'] = POSES_ASCII[self.animation]
             self.animation = (self.animation + 1) if (self.animation + 1 < len(POSES_ASCII)) else 0
             await asyncio.sleep(0.1)
 
+    async def handleStartAbortButtonClick(self):
+        if (self.isRunning):
+            # abort
+            self.process.terminate()
+            self.process = None
+            self.isRunning = False
+
+            #TODO store all tasks and cancel them here
+        else:
+            # start
+            self.directoryStack = [INPUTROOT]
+            self.fileStack = []
+
+            self.loop.create_task(self.getNextFile())
+            self.isRunning = True
+
+            self.startButton['text'] = 'Abort'
+            self.statusLabel['fg'] = 'black'
+            self.turtleBody['text'] = TURTLE_ASCII[0]
+            self.turtleBody['fg'] = 'black'
+            self.turtleLegs['fg'] = 'black'
+            self.pauseButton['state'] = 'normal'
+
     # ffmpeg
     async def getNextFile(self):
+
+        self.startButton['text'] = 'Abort'
         
         if (len(self.fileStack) > 0):
             # process files
@@ -114,6 +142,9 @@ class Window(tk.Tk):
             
             else:
                 print('DONE')
+                self.statusLabel['text'] = 'DONE :D'
+                self.statusLabel['fg'] = 'green'
+                self.startButton['text'] = 'Start'
                 return # done
 
             await self.getNextFile()
@@ -121,7 +152,7 @@ class Window(tk.Tk):
     async def compressFile(self, file):
         
         print(file)
-        self.root.title(file)
+        self.statusLabel['text'] = file
 
         # trigger GUI handler
         self.isRunning = True
@@ -130,70 +161,82 @@ class Window(tk.Tk):
         inputFile = file
         outputFile = os.path.join(OUTPUTROOT, "temp.mp4")
 
-        # READ METADATA
-        cmd = [
-            'ffprobe',
-            '-v', 'quiet', '-loglevel', 'error',
-            '-print_format', 'json',
-            '-show_format',
-            '-show_streams',
-            inputFile
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        metadata = json.loads(result.stdout)
-
-        if ((comment := metadata['format']['tags'].get('comment')) != None) and (COMPRESSION_TAG in comment):
-            # already compressed
-            print(f'\t\tINFO: file has already been compressed (skipping)')
-
-        else:
-            # COMPRESS FILE
+        try:
+            # READ METADATA
             cmd = [
-                'ffmpeg',
-                '-y',
-                '-i', inputFile,
-                '-c:v', VCODEC,
-                '-crf', CRF,
-                '-preset', PRESET,
-                '-c:a', ACODEC,       # audio codec
-                '-b:a', ABITRATE,
-                '-metadata', f'comment={COMPRESSION_COMMENT}',
-                '-x265-params', 'log-level=quiet'
+                'ffprobe',
+                '-v', 'quiet', '-loglevel', 'error',
+                '-print_format', 'json',
+                '-show_format',
+                '-show_streams',
+                inputFile
             ]
-
-            for key, value in metadata['format']['tags'].items():
-                # metadata
-                cmd.append('-metadata')
-                cmd.append(f'{key}={value}')
-
-            # output file
-            cmd.append(outputFile)
-
-            self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True)
-
-            # trigger progress handler
-            self.loop.create_task(self.handleOutput(int(metadata['streams'][0]['nb_frames'])))
-
-            while (self.process.poll() is None):
-                await asyncio.sleep(0)
-
-            # HANDLE RESULT
-            inputFileSize = os.path.getsize(file)
-            outputFileSize = os.path.getsize(outputFile)
-
-            if (outputFileSize >= inputFileSize):
-                print(f'\t\tERROR: result is not smaller than source')
-                os.remove(outputFile)
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if (result.returncode != 0):
+                raise Exception(f'ffprobe failed with code {result.returncode}')
             
-            else:
-                # copy new file to input directory
-                try:
-                    os.rename(outputFile, inputFile) # this is better than shutil.move, but it doesn't work across partitions
-                except:
-                    shutil.move(outputFile, inputFile)
+            metadata = json.loads(result.stdout)
 
-        self.isRunning = False
-        self.loop.create_task(self.getNextFile())
+            if ((comment := metadata['format']['tags'].get('comment')) != None) and (COMPRESSION_TAG in comment):
+                # already compressed
+                print(f'\t\tINFO: file has already been compressed (skipping)')
+
+            else:
+                # COMPRESS FILE
+                cmd = [
+                    'ffmpeg',
+                    '-y',
+                    '-i', inputFile,
+                    '-c:v', VCODEC,
+                    '-crf', CRF,
+                    '-preset', PRESET,
+                    '-c:a', ACODEC,       # audio codec
+                    '-b:a', ABITRATE,
+                    '-metadata', f'comment={COMPRESSION_COMMENT}',
+                    '-x265-params', 'log-level=quiet'
+                ]
+
+                for key, value in metadata['format']['tags'].items():
+                    # metadata
+                    cmd.append('-metadata')
+                    cmd.append(f'{key}={value}')
+
+                # output file
+                cmd.append(outputFile)
+
+                self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True)
+
+                # trigger progress handler
+                self.loop.create_task(self.handleOutput(int(metadata['streams'][0]['nb_frames'])))
+
+                while (self.process.poll() is None):
+                    await asyncio.sleep(0)
+
+                # HANDLE RESULT
+                inputFileSize = os.path.getsize(file)
+                outputFileSize = os.path.getsize(outputFile)
+
+                if (outputFileSize >= inputFileSize):
+                    print(f'\t\tERROR: result is not smaller than source')
+                    os.remove(outputFile)
+                
+                else:
+                    # copy new file to input directory
+                    shutil.move(outputFile, inputFile)# TODO this is not working correctly with metadata
+
+            self.isRunning = False
+            self.loop.create_task(self.getNextFile())
+
+        except Exception as e:
+            print(e)
+            self.isRunning = False
+            self.statusLabel['text'] = 'ERROR :ᗡ'
+            self.statusLabel['fg'] = 'red'
+            self.turtleBody['text'] = TURTLE_ASCII[1]
+            self.turtleBody['fg'] = 'red'
+            self.turtleLegs['fg'] = 'red'
+            self.startButton['text'] = 'Continue'
+            self.pauseButton['state'] = 'disabled'
 
 
     async def handleOutput(self, targetFrames):
@@ -205,7 +248,7 @@ class Window(tk.Tk):
             match = re.search(r'frame=\s*(\d+)', line)
             if (match):
                 # print(int(match.group(1)))
-                self.progressbar["value"] = (int(match.group(1)) / targetFrames) * 100
+                self.progressbar['value'] = (int(match.group(1)) / targetFrames) * 100
 
             await asyncio.sleep(0)
 
