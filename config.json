@@ -1,0 +1,9 @@
+{
+    "inputRoot": "TODO",
+
+    "video_codec": "libx265",
+    "audio_codec": "libmp3lame",
+    "constant_rate_factor": "18",
+    "speed": "ultrafast",
+    "bitrate": "320k"
+}
