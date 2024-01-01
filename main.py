@@ -6,6 +6,7 @@ import asyncio
 import os
 import subprocess
 import json
+from tkinter import filedialog
 
 # SETTINGS
 COMPRESSION_TAG = 'ffmpeg'
@@ -24,9 +25,16 @@ INPUTROOT = config['inputRoot']
 
 # MISC
 COMPRESSION_COMMENT = f'{COMPRESSION_TAG} (-c:v {VCODEC} -crf {CRF} -preset {PRESET} -c:a {ACODEC} -b:a {ABITRATE})'
-TURTLE_ASCII = ['      ________    ____\n      /  \__/  \  |  o |\n     |\__/  \__/|/ ___\|\n    < ___\__/___ _/     ',
-                '      ________    ____\n      /  \__/  \  |  x |\n     |\__/  \__/|/ ___\|\n    < ___\__/___ _/     ']
+TURTLE_ASCII = '      ________    ____\n      /  \__/  \  |  {} |\n     |\__/  \__/|/ ___\|\n    < ___\__/___ _/     '
+TURTLE_EYES = {
+    'normal': 'o',
+    'dead': 'x',
+    'sleep': '–',
+    'blink': '_'
+}
+TURTLE_FACE = '({0}\_/{0})'
 POSES_ASCII = ['|_|_|  |_|_|', '|_|-/  |_|-/', '/-/_|  /-/_|']
+SLEEP_EFFECT = '  ₂ z Z'
 
 
 class App:
@@ -48,14 +56,14 @@ class Window(tk.Tk):
         self.loop = loop
         self.root = tk.Tk()
 
-        self.root.title('tortle-stomp')
+        self.root.title(TURTLE_FACE.format(TURTLE_EYES['sleep']) + SLEEP_EFFECT)
 
         self.animation = 0
         
-        self.turtleBody = tk.Label(text=TURTLE_ASCII[0], font=('Consolas', 8))
+        self.turtleBody = tk.Label(text=f'\n{TURTLE_ASCII.format(TURTLE_EYES["blink"])}', font=('Consolas', 8))
         self.turtleBody.grid(row=0, columnspan=2, padx=(8, 8), pady=(8, 0))
 
-        self.turtleLegs = tk.Label(text=POSES_ASCII[0], font=('Consolas', 8))
+        self.turtleLegs = tk.Label(text='', font=('Consolas', 8))
         self.turtleLegs.grid(row=1, columnspan=2, padx=(8, 8), pady=(0, 4))
 
         self.statusLabel = tk.Label(text='')
@@ -97,18 +105,24 @@ class Window(tk.Tk):
             #TODO store all tasks and cancel them here
         else:
             # start
-            self.directoryStack = [INPUTROOT]
-            self.fileStack = []
+            filepath = filedialog.askdirectory()
 
-            self.loop.create_task(self.getNextFile())
-            self.isRunning = True
+            if (filepath):
+                self.directoryStack = [filepath]
+                self.fileStack = []
 
-            self.startButton['text'] = 'Abort'
-            self.statusLabel['fg'] = 'black'
-            self.turtleBody['text'] = TURTLE_ASCII[0]
-            self.turtleBody['fg'] = 'black'
-            self.turtleLegs['fg'] = 'black'
-            self.pauseButton['state'] = 'normal'
+                self.loop.create_task(self.getNextFile())
+                self.isRunning = True
+
+                self.startButton['text'] = 'Abort'
+                self.statusLabel['fg'] = 'black'
+                self.turtleBody['text'] = TURTLE_ASCII.format(TURTLE_EYES['normal'])
+                self.root.title(TURTLE_FACE.format(TURTLE_EYES['normal']))
+                self.turtleBody['fg'] = 'black'
+                self.turtleLegs['fg'] = 'black'
+                self.pauseButton['state'] = 'normal'
+            else:
+                self.handleError()
 
     # ffmpeg
     async def getNextFile(self):
@@ -145,6 +159,9 @@ class Window(tk.Tk):
                 self.statusLabel['text'] = 'DONE :D'
                 self.statusLabel['fg'] = 'green'
                 self.startButton['text'] = 'Start'
+                self.turtleLegs['text'] = ''
+                self.turtleBody['text'] = f'\n{TURTLE_ASCII.format(TURTLE_EYES["blink"])}'
+                self.root.title(TURTLE_FACE.format(TURTLE_EYES['sleep']) + SLEEP_EFFECT)
                 return # done
 
             await self.getNextFile()
@@ -229,14 +246,7 @@ class Window(tk.Tk):
 
         except Exception as e:
             print(e)
-            self.isRunning = False
-            self.statusLabel['text'] = 'ERROR :ᗡ'
-            self.statusLabel['fg'] = 'red'
-            self.turtleBody['text'] = TURTLE_ASCII[1]
-            self.turtleBody['fg'] = 'red'
-            self.turtleLegs['fg'] = 'red'
-            self.startButton['text'] = 'Continue'
-            self.pauseButton['state'] = 'disabled'
+            self.handleError()
 
 
     async def handleOutput(self, targetFrames):
@@ -251,5 +261,17 @@ class Window(tk.Tk):
                 self.progressbar['value'] = (int(match.group(1)) / targetFrames) * 100
 
             await asyncio.sleep(0)
+
+
+    def handleError(self):
+        self.isRunning = False
+        self.statusLabel['text'] = 'ERROR :ᗡ'
+        self.statusLabel['fg'] = 'red'
+        self.turtleBody['text'] = TURTLE_ASCII.format(TURTLE_EYES["dead"])
+        self.root.title(TURTLE_FACE.format(TURTLE_EYES['dead']) + '  F')
+        self.turtleBody['fg'] = 'red'
+        self.turtleLegs['fg'] = 'red'
+        self.startButton['text'] = 'Start'
+        self.pauseButton['state'] = 'disabled'
 
 asyncio.run(App().exec())
