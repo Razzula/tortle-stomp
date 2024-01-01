@@ -7,6 +7,7 @@ import os
 import subprocess
 import json
 from tkinter import filedialog
+import psutil
 
 # SETTINGS
 COMPRESSION_TAG = 'ffmpeg'
@@ -46,6 +47,7 @@ class App:
 class Window(tk.Tk):
 
     process = None
+    isAlive = False
     isRunning = False
 
     directoryStack = [INPUTROOT]
@@ -75,7 +77,7 @@ class Window(tk.Tk):
         self.startButton = tk.Button(text="Start", width=10, command=lambda: self.loop.create_task(self.handleStartAbortButtonClick()))
         self.startButton.grid(row=4, column=0, sticky=tk.W, padx=8, pady=8)
 
-        self.pauseButton = tk.Button(text="Pause", width=10, command=lambda: None, state='disabled')
+        self.pauseButton = tk.Button(text="Pause", width=10, command=lambda: self.loop.create_task(self.handlePlayPauseButtonClick()), state='disabled')
         self.pauseButton.grid(row=4, column=1, sticky=tk.W, padx=8, pady=8)
 
         self.stream = asyncio.StreamReader()
@@ -93,14 +95,14 @@ class Window(tk.Tk):
         while (self.isRunning):
             self.turtleLegs['text'] = POSES_ASCII[self.animation]
             self.animation = (self.animation + 1) if (self.animation + 1 < len(POSES_ASCII)) else 0
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.5)
 
     async def handleStartAbortButtonClick(self):
-        if (self.isRunning):
+        if (self.isAlive):
             # abort
             self.process.terminate()
             self.process = None
-            self.isRunning = False
+            self.isAlive = False
 
             #TODO store all tasks and cancel them here
         else:
@@ -112,7 +114,7 @@ class Window(tk.Tk):
                 self.fileStack = []
 
                 self.loop.create_task(self.getNextFile())
-                self.isRunning = True
+                self.isAlive = True
 
                 self.startButton['text'] = 'Abort'
                 self.statusLabel['fg'] = 'black'
@@ -123,6 +125,26 @@ class Window(tk.Tk):
                 self.pauseButton['state'] = 'normal'
             else:
                 self.handleError()
+
+
+    async def handlePlayPauseButtonClick(self):
+        
+        if (self.process):
+            if (self.isRunning):
+                # pause
+                psutil.Process(self.process.pid).suspend()
+
+                self.pauseButton['text'] = 'Resume'
+
+            else:
+                # resume
+                psutil.Process(self.process.pid).resume()
+
+                self.pauseButton['text'] = 'Pause'
+                self.loop.create_task(self.playAnimation())
+
+            self.isRunning = not self.isRunning
+
 
     # ffmpeg
     async def getNextFile(self):
@@ -162,6 +184,7 @@ class Window(tk.Tk):
                 self.turtleLegs['text'] = ''
                 self.turtleBody['text'] = f'\n{TURTLE_ASCII.format(TURTLE_EYES["blink"])}'
                 self.root.title(TURTLE_FACE.format(TURTLE_EYES['sleep']) + SLEEP_EFFECT)
+                self.isAlive = False
                 return # done
 
             await self.getNextFile()
@@ -250,14 +273,16 @@ class Window(tk.Tk):
 
 
     async def handleOutput(self, targetFrames):
+
+        loop = asyncio.get_event_loop()
+
         while True:
-            line = self.process.stdout.readline() #TODO use asyncio to improve performance
+            line = await loop.run_in_executor(None, self.process.stdout.readline)
             if not line:
                 break
 
             match = re.search(r'frame=\s*(\d+)', line)
             if (match):
-                # print(int(match.group(1)))
                 self.progressbar['value'] = (int(match.group(1)) / targetFrames) * 100
 
             await asyncio.sleep(0)
@@ -265,6 +290,7 @@ class Window(tk.Tk):
 
     def handleError(self):
         self.isRunning = False
+        self.isAlive = False
         self.statusLabel['text'] = 'ERROR :ᗡ'
         self.statusLabel['fg'] = 'red'
         self.turtleBody['text'] = TURTLE_ASCII.format(TURTLE_EYES["dead"])
@@ -275,3 +301,9 @@ class Window(tk.Tk):
         self.pauseButton['state'] = 'disabled'
 
 asyncio.run(App().exec())
+
+# TODO
+# - logging
+# - better UI
+# - stats
+# - autorun
