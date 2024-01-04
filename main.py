@@ -1,31 +1,25 @@
+import asyncio
+import json
+import os
 import re
 import shutil
-import tkinter as tk
-from tkinter import ttk
-import asyncio
-import os
 import subprocess
-import json
-from tkinter import filedialog
+import tkinter as tk
+import winreg as wr
+from tkinter import filedialog, messagebox, ttk
+from idlelib.tooltip import Hovertip
 import psutil
 
 # SETTINGS
+APPLICATION_NAME = 'tortle-stomp'
+PROGRAM_PATH = os.path.abspath(os.path.join(os.getcwd(), f'{APPLICATION_NAME}.exe'))
+STARTUP_REGISTRY_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
+
 COMPRESSION_TAG = 'ffmpeg'
 OUTPUTROOT = os.path.join(os.path.abspath(os.getcwd()), 'bin')
 
-with open('config.json') as f:
-    config = json.load(f)
-
-VCODEC = config['video_codec']
-ACODEC = config['audio_codec']
-CRF = config['constant_rate_factor']
-PRESET = config['speed']
-ABITRATE = config['bitrate']
-
-INPUTROOT = config['inputRoot']
-
 # MISC
-COMPRESSION_COMMENT = f'{COMPRESSION_TAG} (-c:v {VCODEC} -crf {CRF} -preset {PRESET} -c:a {ACODEC} -b:a {ABITRATE})'
+COMMENT_TEMPLATE = '{} (-c:v {} -crf {} -preset {} -c:a {} -b:a {})'
 TURTLE_ASCII = '      ________    ____\n      /  \__/  \  |  {} |\n     |\__/  \__/|/ ___\|\n    < ___\__/___ _/     '
 TURTLE_EYES = {
     'normal': 'o',
@@ -33,71 +27,164 @@ TURTLE_EYES = {
     'sleep': '–',
     'blink': '_'
 }
-TURTLE_FACE = '({0}\_/{0})'
+TURTLE_FACE = 'tortle-stomp  ({0}\_/{0})  {1}'
 POSES_ASCII = ['|_|_|  |_|_|', '|_|-/  |_|-/', '/-/_|  /-/_|']
 SLEEP_EFFECT = '  ₂ z Z'
 
+FFMPEG_SPEEDS = ['veryslow', 'slower', 'slow', 'medium', 'fast', 'faster', 'veryfast', 'superfast', 'ultrafast']
 
 class App:
+    """
+    Main application
+    """
+
     async def exec(self):
-        self.window = Window(asyncio.get_event_loop())
+        """
+        Start application
+        """
+        if (not os.path.exists('config.json')):
+            with open('config.json', 'w') as f:
+                json.dump({}, f)
+
+        self.window = MainWindow(asyncio.get_event_loop())
         await self.window.show()
 
 
-class Window(tk.Tk):
+class MainWindow(tk.Tk):
+    """
+    Main tkinter window
+    """
 
     process = None
     isAlive = False
     isRunning = False
 
-    directoryStack = [INPUTROOT]
+    directoryStack = []
     fileStack = []
+
 
     # tkinter
     def __init__(self, loop):
+        """
+        Initialize the tkinter window
+        """
+
         self.loop = loop
         self.root = tk.Tk()
 
-        self.root.title(TURTLE_FACE.format(TURTLE_EYES['sleep']) + SLEEP_EFFECT)
+        # WINDOW
+        self.root.geometry("545x190")
+        self.root.resizable(width=False, height=False)
 
-        self.animation = 0
-        
+        self.root.columnconfigure(0, weight=1)
+        self.root.columnconfigure(1, weight=1)
+
+        self.root.wm_attributes('-toolwindow', 'True')
+        self.root.title(TURTLE_FACE.format(TURTLE_EYES['sleep'], SLEEP_EFFECT))
+
+        # CONTROLS
+        # turtle
         self.turtleBody = tk.Label(text=f'\n{TURTLE_ASCII.format(TURTLE_EYES["blink"])}', font=('Consolas', 8))
-        self.turtleBody.grid(row=0, columnspan=2, padx=(8, 8), pady=(8, 0))
+        self.turtleBody.grid(row=0, columnspan=2, padx=(8, 8), pady=(0, 0))
 
         self.turtleLegs = tk.Label(text='', font=('Consolas', 8))
         self.turtleLegs.grid(row=1, columnspan=2, padx=(8, 8), pady=(0, 4))
 
+        # feedback
         self.statusLabel = tk.Label(text='')
         self.statusLabel.grid(row=2, columnspan=2, padx=(8, 8), pady=(0, 0))
         
         self.progressbar = ttk.Progressbar(length=280)
         self.progressbar.grid(row=3, columnspan=2, padx=(8, 8), pady=(4, 0))
         
+        # buttons
         self.startButton = tk.Button(text="Start", width=10, command=lambda: self.loop.create_task(self.handleStartAbortButtonClick()))
-        self.startButton.grid(row=4, column=0, sticky=tk.W, padx=8, pady=8)
+        self.startButton.grid(row=4, column=0, sticky='E', padx=8, pady=8)
 
         self.pauseButton = tk.Button(text="Pause", width=10, command=lambda: self.loop.create_task(self.handlePlayPauseButtonClick()), state='disabled')
         self.pauseButton.grid(row=4, column=1, sticky=tk.W, padx=8, pady=8)
 
-        self.stream = asyncio.StreamReader()
+        self.settingsButton = tk.Button(text="Settings", width=10, command=self.openSettingsWindow)
+        self.settingsButton.grid(row=0, column=0, padx=2, pady=0, sticky="w")
+        self.settingsWindow = None
+
+        # VARIABLES
+        self.animation = 0
+
+        # AUTORUN
+        self.loop.create_task(self.handleAutorun())
+
 
     async def show(self):
-        # ANIMATION
+        """
+        Display the tkinter window
+        """
         try:
             while True:
                 self.root.update()
                 await asyncio.sleep(0.1)
         except:
-            pass
+            pass # gracefully exit
+
+
+    def loadSettings(self):
+        """
+        Load settings from config.json into class variables
+        """
+
+        with open('config.json') as f:
+            config = json.load(f)
+
+        self.vcodec = config.get('video_codec', 'libx265')
+        self.acodec = config.get('audio_codec', 'libmp3lame')
+        self.crf = config.get('constant_rate_factor', 0)
+        self.preset = FFMPEG_SPEEDS[config.get('speed', 0)]
+        self.abitrate = config.get('bitrate', '320k')
+
+        self.compressionComment = COMMENT_TEMPLATE.format(COMPRESSION_TAG, self.vcodec, self.crf, self.preset, self.acodec, self.abitrate)
+
+        self.autorun = config.get('autorunPath', None) if (config.get('autorun', False)) else False
+
+        self.overwrite = config.get('overwrite', False)
+
+
+    def openSettingsWindow(self):
+        """
+        Open the settings window
+        """
+        if (self.isAlive):
+            messagebox.showwarning("Warning", f"A compression process is currently in progress. \nAny changes made will not affect the current process.")
+
+        if (self.settingsWindow):
+            self.settingsWindow.focus_force()
+        else:
+            self.settingsWindow = SettingsWindow(self.loop, self)
+
 
     async def playAnimation(self): 
+        """
+        Play the turtle animation
+        """
         while (self.isRunning):
             self.turtleLegs['text'] = POSES_ASCII[self.animation]
             self.animation = (self.animation + 1) if (self.animation + 1 < len(POSES_ASCII)) else 0
             await asyncio.sleep(0.5)
 
+
+    async def handleAutorun(self):
+        """
+        Trigger the process automatically if autorun is enabled
+        """
+        self.loadSettings()
+        
+        if (self.autorun):
+            self.beginProcess(self.autorun)
+
+
     async def handleStartAbortButtonClick(self):
+        """
+        Start or abort the compression process
+        """
         if (self.isAlive):
             # abort
             self.process.terminate()
@@ -107,40 +194,68 @@ class Window(tk.Tk):
             #TODO store all tasks and cancel them here
         else:
             # start
-            filepath = filedialog.askdirectory()
+            self.beginProcess(filedialog.askdirectory())
 
-            if (filepath):
-                self.directoryStack = [filepath]
-                self.fileStack = []
 
-                self.loop.create_task(self.getNextFile())
-                self.isAlive = True
+    def beginProcess(self, filepath):
+        """
+        Start the compression process
+        """
+        # check ffmpeg is installed
+        try:
+            result = subprocess.run(['ffmpeg', '-version'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if (result.returncode != 0):
+                raise Exception(result.returncode)
+        except:
+            messagebox.showerror("Error", "FFmpeg is not installed. Please install it and try again.")
+            return
 
-                self.startButton['text'] = 'Abort'
-                self.statusLabel['fg'] = 'black'
-                self.turtleBody['text'] = TURTLE_ASCII.format(TURTLE_EYES['normal'])
-                self.root.title(TURTLE_FACE.format(TURTLE_EYES['normal']))
-                self.turtleBody['fg'] = 'black'
-                self.turtleLegs['fg'] = 'black'
-                self.pauseButton['state'] = 'normal'
-            else:
-                self.handleError()
+        
+        # check if settings are valid
+        self.loadSettings()
+        if (self.overwrite and self.crf > 18): # upper threshold for visually lossless is 18
+            messagebox.showwarning("Warning", "Your current settings will result in a loss of quality. \n\nPlease consider disabling the 'Overwrite existing files' option or lowering the CRF value.")
+
+        if (filepath):
+            # final initialization
+            self.directoryStack = [filepath]
+            self.fileStack = []
+
+            # start process
+            self.loop.create_task(self.getNextFile())
+            self.isAlive = True
+
+            # output to GUI
+            self.startButton['text'] = 'Abort'
+            self.statusLabel['fg'] = 'black'
+            self.turtleBody['text'] = TURTLE_ASCII.format(TURTLE_EYES['normal'])
+            self.root.title(TURTLE_FACE.format(TURTLE_EYES['normal'], 'Plodding along...'))
+            self.turtleBody['fg'] = 'black'
+            self.turtleLegs['fg'] = 'black'
+            self.pauseButton['state'] = 'normal'
+        else:
+            messagebox.showerror("Error", "No directory was selected.")
+            self.handleError()
 
 
     async def handlePlayPauseButtonClick(self):
-        
+        """
+        Pause or resume the compression process
+        """ 
         if (self.process):
             if (self.isRunning):
                 # pause
                 psutil.Process(self.process.pid).suspend()
 
                 self.pauseButton['text'] = 'Resume'
+                self.root.title(TURTLE_FACE.format(TURTLE_EYES['sleep'], 'Taking a break...'))
 
             else:
                 # resume
                 psutil.Process(self.process.pid).resume()
 
                 self.pauseButton['text'] = 'Pause'
+                self.root.title(TURTLE_FACE.format(TURTLE_EYES['normal'], 'Plodding along...'))
                 self.loop.create_task(self.playAnimation())
 
             self.isRunning = not self.isRunning
@@ -148,6 +263,10 @@ class Window(tk.Tk):
 
     # ffmpeg
     async def getNextFile(self):
+        """
+        Find and trigger compression of the next file
+        This is the main loop, called cyclically by the application (as well as recursively by itself)
+        """
 
         self.startButton['text'] = 'Abort'
         
@@ -155,8 +274,7 @@ class Window(tk.Tk):
             # process files
             
             file = self.fileStack.pop()
-
-            task = self.loop.create_task(self.compressFile(file))
+            self.loop.create_task(self.compressFile(file))
 
         else:
             # fetch more files
@@ -183,13 +301,17 @@ class Window(tk.Tk):
                 self.startButton['text'] = 'Start'
                 self.turtleLegs['text'] = ''
                 self.turtleBody['text'] = f'\n{TURTLE_ASCII.format(TURTLE_EYES["blink"])}'
-                self.root.title(TURTLE_FACE.format(TURTLE_EYES['sleep']) + SLEEP_EFFECT)
+                self.root.title(TURTLE_FACE.format(TURTLE_EYES['sleep'], SLEEP_EFFECT))
                 self.isAlive = False
                 return # done
 
             await self.getNextFile()
 
+
     async def compressFile(self, file):
+        """
+        Compress a single file using ffmpeg
+        """
         
         print(file)
         self.statusLabel['text'] = file
@@ -227,12 +349,12 @@ class Window(tk.Tk):
                     'ffmpeg',
                     '-y',
                     '-i', inputFile,
-                    '-c:v', VCODEC,
-                    '-crf', CRF,
-                    '-preset', PRESET,
-                    '-c:a', ACODEC,       # audio codec
-                    '-b:a', ABITRATE,
-                    '-metadata', f'comment={COMPRESSION_COMMENT}',
+                    '-c:v', self.vcodec,
+                    '-crf', str(self.crf),
+                    '-preset', self.preset,
+                    '-c:a', self.acodec,       # audio codec
+                    '-b:a', self.abitrate,
+                    '-metadata', f'comment={self.compressionComment}',
                     '-x265-params', 'log-level=quiet'
                 ]
 
@@ -273,7 +395,9 @@ class Window(tk.Tk):
 
 
     async def handleOutput(self, targetFrames):
-
+        """
+        Display ffmpeg process' progress in the GUI
+        """
         loop = asyncio.get_event_loop()
 
         while True:
@@ -289,21 +413,215 @@ class Window(tk.Tk):
 
 
     def handleError(self):
+        """
+        Display error message in the GUI
+        """
         self.isRunning = False
         self.isAlive = False
         self.statusLabel['text'] = 'ERROR :ᗡ'
         self.statusLabel['fg'] = 'red'
         self.turtleBody['text'] = TURTLE_ASCII.format(TURTLE_EYES["dead"])
-        self.root.title(TURTLE_FACE.format(TURTLE_EYES['dead']) + '  F')
+        self.root.title(TURTLE_FACE.format(TURTLE_EYES['dead'], 'RIP'))
         self.turtleBody['fg'] = 'red'
         self.turtleLegs['fg'] = 'red'
         self.startButton['text'] = 'Start'
         self.pauseButton['state'] = 'disabled'
 
+
+class SettingsWindow(tk.Tk):
+    """
+    Settings tkinter window
+    """
+
+    def __init__(self, loop, parent):
+        """
+        Initialize the tkinter window
+        """
+        super().__init__()
+
+        self.loop = loop
+        self.parent = parent
+
+        # WINDOW
+        self.resizable(width=False, height=False)
+        self.title('Settings')
+        self.wm_attributes('-toolwindow', 'True')
+
+        self.protocol("WM_DELETE_WINDOW", self.onExit)
+
+        # CONTROLS
+        # autorun
+        self.autorunLabel = tk.Label(self, text='Autorun:')
+        self.autorunLabel.grid(row=0, column=0, sticky='E', padx=(10, 5), pady=(10, 0))
+
+        self.autorunCheckbox = tk.Checkbutton(self, variable=tk.IntVar(name='autorun'), command=lambda: self.handleCheckboxClick(self.autorunCheckbox, 'autorun'))
+        Hovertip(self.autorunCheckbox,'Should the compression process trigger automatically upon starting the application?', hover_delay=200)
+        self.autorunCheckbox.grid(row=0, column=1, sticky='W', padx=(5, 10), pady=(10, 0))
+
+        self.autorunDirEntry = tk.Entry(self, state='disabled', width=45)
+        Hovertip(self.autorunDirEntry,'The directory which should be used when using autorun', hover_delay=200)
+        self.autorunDirEntry.grid(row=1, column=0, columnspan=2, sticky='E', padx=(10, 5), pady=(0, 10))
+
+        self.autorunDirButton = tk.Button(self, text='...', command=self.selectAutorunDirectory)
+        self.autorunDirButton.grid(row=1, column=2, sticky='W', padx=(5, 10), pady=(0, 10))
+
+        self.autorunLabel = tk.Label(self, text='Begin on Startup:')
+        self.autorunLabel.grid(row=2, column=0, sticky='E', padx=(10, 5), pady=(2, 0))
+
+        self.startupCheckbox = tk.Checkbutton(self, variable=tk.IntVar(name='startup'), command=lambda: self.handleCheckboxClick(self.startupCheckbox, 'startup'))
+        Hovertip(self.startupCheckbox,'Should this application start automatically when your computer boots?', hover_delay=200)
+        self.startupCheckbox.grid(row=2, column=1, sticky='W', padx=(5, 10), pady=(2, 0))
+
+        # compression settings
+        self.hr = ttk.Separator(self, orient='horizontal')
+        self.hr.grid(row=3, columnspan=2, sticky='EW', padx=(10, 10), pady=(10, 5))
+
+        self.crfLabel = tk.Label(self, text='Constant Rate Factor:', fg='green')
+        self.crfLabel.grid(row=5, column=0, sticky='E', padx=(10, 5), pady=(5, 5))
+
+        self.crfScale = tk.Scale(self, from_=0, to=51, orient=tk.HORIZONTAL, length=200, tickinterval=6, command=self.handleCrfChange)
+        Hovertip(self.crfScale,'Level of compression aggression (affects data quality) \n\n0 : Lossless\n1-17: Visually Lossless\n23-51: Lossy', hover_delay=200)
+        self.crfScale.grid(row=5, column=1, sticky='W', padx=(5, 10), pady=(5, 5))
+
+        self.speedLabel = tk.Label(self, text='Efficiency:', fg='green')
+        self.speedLabel.grid(row=6, column=0, sticky='E', padx=(10, 5), pady=(5, 5))
+
+        self.speedScale = tk.Scale(self, from_=0, to=8, orient=tk.HORIZONTAL, length=200, command=self.handlePresetChange, showvalue=0, label='veryslow')
+        Hovertip(self.speedScale,'Level of compression efficiency \n(affects compression speed) \n\n"Use the slowest preset that you have patience for"', hover_delay=200)
+        self.speedScale.grid(row=6, column=1, sticky='W', padx=(5, 10), pady=(5, 5))
+
+        # file settings
+        self.hr = ttk.Separator(self, orient='horizontal')
+        self.hr.grid(row=7, columnspan=2, sticky='EW', padx=(10, 10), pady=(10, 5))
+
+        self.fileOverwriteLabel = tk.Label(self, text='Overwrite source:')
+        self.fileOverwriteLabel.grid(row=8, column=0, sticky='E', padx=(10, 5), pady=(5, 5))
+
+        self.fileOverwriteCheckbox = tk.Checkbutton(self, variable=tk.IntVar(name='overwrite'), command=lambda: self.handleCheckboxClick(self.fileOverwriteCheckbox, 'overwrite'))
+        Hovertip(self.fileOverwriteCheckbox,'Replace original files upon completion? \n(ignored if output is not smaller than source)', hover_delay=200)
+        self.fileOverwriteCheckbox.grid(row=8, column=1, sticky='W', padx=(5, 10), pady=(5, 5))
+
+        # LOAD SETTINGS
+        self.loadSettings()
+
+
+    def onExit(self):
+        """
+        Close the settings window
+        """
+
+        self.saveSettings()
+        
+        # if (self.parent.isAlive):
+        #     messagebox.showwarning("Warning", "A compression process is currently running. Please abort it for these settings to take effect.")
+
+        self.parent.settingsWindow = None
+        self.destroy()
+
+    def loadSettings(self):
+        """
+        Load settings from config.json into class variables
+        """
+
+        with open('config.json') as f:
+            self.config = json.load(f)
+
+        # READ
+        self.autorunCheckbox.select() if (self.config.get('autorun', False)) else self.autorunCheckbox.deselect()
+        self.startupCheckbox.select() if (self.config.get('startup', False)) else self.startupCheckbox.deselect()
+        self.setAutorunDirectory(self.config.get('autorunPath', ''))
+
+        self.crfScale.set(self.config.get('constant_rate_factor', 0))
+        self.speedScale.set(self.config.get('speed', 0))
+
+        self.fileOverwriteCheckbox.select() if (self.config.get('overwrite', False)) else self.fileOverwriteCheckbox.deselect()
+
+    def saveSettings(self):
+        """
+        Save settings from class variables into config.json
+        """
+        
+        with open('config.json', 'w') as f:
+            json.dump(self.config, f, indent=4, sort_keys=True)
+
+        try:
+            # Open the registry key
+            with wr.OpenKey(wr.HKEY_CURRENT_USER, STARTUP_REGISTRY_KEY, 0, wr.KEY_SET_VALUE) as registry_key:
+                if (self.config.get('startup', False)):
+                    # Set the registry value to the program path
+                    wr.SetValueEx(registry_key, APPLICATION_NAME, 0, wr.REG_SZ, PROGRAM_PATH)
+                else:
+                    # Delete the registry value for the specified application
+                    wr.DeleteValue(registry_key, APPLICATION_NAME)
+        except FileNotFoundError:
+            pass # already doesn't exist
+        except Exception as e:
+            print(f"Error: {e}")
+
+    
+    def setAutorunDirectory(self, directory):
+        """
+        Set the autorun directory
+        """
+        self.autorunDirEntry.config(state='normal')
+        self.autorunDirEntry.delete(0, tk.END)
+        self.autorunDirEntry.insert(tk.END, directory)
+        self.autorunDirEntry.config(state='disabled')
+
+
+    def handleCheckboxClick(self, checkbox, variable):
+        """
+        Handle checkbox click
+        """
+        self.config[variable] = int(checkbox.getvar(variable))
+
+    
+    def handlePresetChange(self, value):
+        """
+        Handle preset change
+        """
+        value= int(value)
+        self.config['speed'] = value
+
+        self.speedScale.config(label=FFMPEG_SPEEDS[value])
+
+        if (value <= 2):
+            self.speedLabel['fg'] = 'green'
+        elif (value == 3):
+            self.speedLabel['fg'] = 'orange'
+        else:
+            self.speedLabel['fg'] = 'red'
+
+
+    def handleCrfChange(self, value):
+        """
+        Handle CRF scale change
+        """
+        value = int(value)
+        self.config['constant_rate_factor'] = value
+
+        if (value == 0):
+            self.crfLabel['fg'] = 'green'
+        elif (value <= 18):
+            self.crfLabel['fg'] = 'orange'
+        else:
+            self.crfLabel['fg'] = 'red'
+
+
+    
+    def selectAutorunDirectory(self):
+        """
+        Handle autorun directory selection
+        """
+        dir = filedialog.askdirectory()
+        if (dir):
+            self.config['autorunPath'] = dir
+            self.setAutorunDirectory(dir)
+
+
 asyncio.run(App().exec())
 
 # TODO
 # - logging
-# - better UI
 # - stats
 # - autorun
