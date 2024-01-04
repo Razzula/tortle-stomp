@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import tkinter as tk
 import winreg as wr
 from tkinter import filedialog, messagebox, ttk
@@ -80,8 +81,11 @@ class MainWindow(tk.Tk):
         self.root.geometry("545x190")
         self.root.resizable(width=False, height=False)
 
-        self.root.columnconfigure(0, weight=1)
-        self.root.columnconfigure(1, weight=1)
+        self.root.columnconfigure(0, minsize=76, weight=1)
+        self.root.columnconfigure(1, minsize=76, weight=1)
+        self.root.columnconfigure(2, weight=2)
+        self.root.columnconfigure(3, minsize=76, weight=1)
+        self.root.columnconfigure(4, minsize=76, weight=1)
 
         if (getattr(sys, 'frozen', False)):
             # bundled
@@ -93,28 +97,43 @@ class MainWindow(tk.Tk):
         # CONTROLS
         # turtle
         self.turtleBody = tk.Label(text=f'\n{TURTLE_ASCII.format(TURTLE_EYES["blink"])}', font=('Consolas', 8))
-        self.turtleBody.grid(row=0, columnspan=2, padx=(8, 8), pady=(0, 0))
+        self.turtleBody.grid(row=0, column=2, padx=(8, 8), pady=(0, 0))
 
         self.turtleLegs = tk.Label(text='', font=('Consolas', 8))
-        self.turtleLegs.grid(row=1, columnspan=2, padx=(8, 8), pady=(0, 4))
+        self.turtleLegs.grid(row=1, column=2, padx=(8, 8), pady=(0, 4))
 
         # feedback
         self.statusLabel = tk.Label(text='')
-        self.statusLabel.grid(row=2, columnspan=2, padx=(8, 8), pady=(0, 0))
+        self.statusLabel.grid(row=2, columnspan=5, padx=(8, 8), pady=(0, 0))
         
-        self.progressbar = ttk.Progressbar(length=280)
-        self.progressbar.grid(row=3, columnspan=2, padx=(8, 8), pady=(4, 0))
+        self.progressbar = ttk.Progressbar(length=360)
+        self.progressbar.grid(row=3, column=1, columnspan=3, padx=(8, 8), pady=(4, 0))
         
         # buttons
         self.startButton = tk.Button(text="Start", width=10, command=lambda: self.loop.create_task(self.handleStartAbortButtonClick()))
-        self.startButton.grid(row=4, column=0, sticky='E', padx=8, pady=8)
+        self.startButton.grid(row=4, column=1, sticky='E', padx=0, pady=8)
 
         self.pauseButton = tk.Button(text="Pause", width=10, command=lambda: self.loop.create_task(self.handlePlayPauseButtonClick()), state='disabled')
-        self.pauseButton.grid(row=4, column=1, sticky=tk.W, padx=8, pady=8)
+        self.pauseButton.grid(row=4, column=3, sticky=tk.W, padx=0, pady=8)
 
         self.settingsButton = tk.Button(text="Settings", width=10, command=self.openSettingsWindow)
-        self.settingsButton.grid(row=0, column=0, padx=2, pady=0, sticky="w")
         self.settingsWindow = None
+        self.settingsButton.grid(row=0, column=0, padx=2, pady=0, sticky="w")
+
+        # stats
+        self.originalSizeLabel = tk.Label(text='0.00 MB')
+        self.originalSizeLabel.grid(row=3, column=0, sticky='E', padx=12, pady=0)
+        self.originalFileSize = 0
+
+        self.newSizeLabel = tk.Label(text='0.00 MB')
+        self.newSizeLabel.grid(row=3, column=4, sticky=tk.W, padx=12, pady=0)
+        self.newFileSize = 0
+
+        self.timerLabel = tk.Label(text='0:00:00 | 0:00:00')
+        self.timerLabel.grid(row=4, column=2, sticky='EW', padx=0, pady=0)
+        self.currentFileTime = 0
+        self.currentProcessTime = 0
+        self.timeOfLastCheck = 0
 
         # VARIABLES
         self.animation = 0
@@ -146,7 +165,8 @@ class MainWindow(tk.Tk):
         self.vcodec = config.get('video_codec', 'libx265')
         self.acodec = config.get('audio_codec', 'libmp3lame')
         self.crf = config.get('constant_rate_factor', 0)
-        self.preset = FFMPEG_SPEEDS[config.get('speed', 0)]
+        self.speed = config.get('speed', 0)
+        self.preset = FFMPEG_SPEEDS[self.speed]
         self.abitrate = config.get('bitrate', '320k')
 
         self.compressionComment = COMMENT_TEMPLATE.format(COMPRESSION_TAG, self.vcodec, self.crf, self.preset, self.acodec, self.abitrate)
@@ -176,7 +196,28 @@ class MainWindow(tk.Tk):
         while (self.isRunning):
             self.turtleLegs['text'] = POSES_ASCII[self.animation]
             self.animation = (self.animation + 1) if (self.animation + 1 < len(POSES_ASCII)) else 0
-            await asyncio.sleep(0.5)
+
+            if (self.timeOfLastCheck):
+                currentTime = time.time()
+                delta = currentTime - self.timeOfLastCheck
+                self.currentFileTime += delta
+                self.currentProcessTime += delta
+                self.timeOfLastCheck = currentTime
+                
+                self.timerLabel['text'] = f'{self.formatTime(self.currentProcessTime)} | {self.formatTime(self.currentFileTime)}'
+
+            await asyncio.sleep(0.5 - (0.45 * (self.speed / 8)))
+
+
+    def formatTime(self, seconds):
+        """
+        Format seconds into a human-readable string
+        """
+        minutes = int(seconds // 60)
+        seconds = int(seconds % 60)
+        hours = int(minutes // 60)
+        minutes = int(minutes % 60)
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
     async def handleAutorun(self):
@@ -199,6 +240,9 @@ class MainWindow(tk.Tk):
             self.process = None
             self.isAlive = False
 
+            await asyncio.sleep(0.1)
+            self.progressbar['value'] = 0
+
             #TODO store all tasks and cancel them here
         else:
             # start
@@ -217,12 +261,11 @@ class MainWindow(tk.Tk):
         except:
             messagebox.showerror("Error", "FFmpeg is not installed. Please install it and try again.")
             return
-
         
         # check if settings are valid
         self.loadSettings()
         if (self.overwrite and self.crf > 18): # upper threshold for visually lossless is 18
-            messagebox.showwarning("Warning", "Your current settings will result in a loss of quality. \n\nPlease consider disabling the 'Overwrite existing files' option or lowering the CRF value.")
+            messagebox.showwarning("Warning", "Your current settings will result in a loss of quality! \n\nPlease consider disabling the 'Overwrite source' option or lowering the CRF value.")
 
         if (filepath):
             # final initialization
@@ -230,6 +273,8 @@ class MainWindow(tk.Tk):
             self.fileStack = []
 
             # start process
+            self.currentProcessTime = 0
+            self.timeOfLastCheck = time.time()
             self.loop.create_task(self.getNextFile())
             self.isAlive = True
 
@@ -260,11 +305,14 @@ class MainWindow(tk.Tk):
 
             else:
                 # resume
+                self.timeOfLastCheck = time.time()
+
                 psutil.Process(self.process.pid).resume()
 
                 self.pauseButton['text'] = 'Pause'
                 self.root.title(TURTLE_FACE.format(TURTLE_EYES['normal'], 'Plodding along...'))
                 self.loop.create_task(self.playAnimation())
+
 
             self.isRunning = not self.isRunning
 
@@ -277,6 +325,7 @@ class MainWindow(tk.Tk):
         """
 
         self.startButton['text'] = 'Abort'
+        self.currentFileTime = 0
         
         if (len(self.fileStack) > 0):
             # process files
@@ -346,6 +395,10 @@ class MainWindow(tk.Tk):
                 print(f'\t\tINFO: file has already been compressed (skipping)')
 
             else:
+                self.originalFileSize = int(metadata['format']['size']) / 1000000
+                self.originalSizeLabel['text'] = f'{self.originalFileSize:.2f} MB'
+                self.newSizeLabel['fg'] = 'green'
+
                 # COMPRESS FILE
                 cmd = [
                     'ffmpeg',
@@ -385,8 +438,13 @@ class MainWindow(tk.Tk):
                     os.remove(outputFile)
                 
                 else:
-                    # copy new file to input directory
-                    shutil.move(outputFile, inputFile)# TODO this is not working correctly with metadata
+                    if (self.overwrite):
+                        print(f'\t\tINFO: overwriting source file')
+                        shutil.move(outputFile, inputFile) #TODO this is not working correctly with metadata
+                    else:
+                        print(f'\t\tINFO: saving to output directory')
+                        fileName = os.path.basename(file)[:-4] #exclude .mp4
+                        shutil.move(outputFile, os.path.join(os.path.dirname(inputFile), f'{fileName} (compressed).mp4'))
 
             self.isRunning = False
             self.loop.create_task(self.getNextFile())
@@ -416,6 +474,14 @@ class MainWindow(tk.Tk):
             match = re.search(r'frame=\s*(\d+)', line)
             if (match):
                 self.progressbar['value'] = (int(match.group(1)) / targetFrames) * 100
+            match = re.search(r'size=\s*(\d+)kB', line)
+            if (match):
+                self.newFileSize = int(match.group(1)) / 1000
+                self.newSizeLabel['text'] = f'{self.newFileSize:.2f} MB\n({int(self.newFileSize / self.originalFileSize * 100)}%)'
+
+                if (self.newFileSize >= self.originalFileSize):
+                    pass #TODO skip file
+
 
             await asyncio.sleep(0)
 
@@ -432,6 +498,7 @@ class MainWindow(tk.Tk):
         self.turtleLegs['text'] = ''
         self.turtleBody['text'] = f'\n{TURTLE_ASCII.format(TURTLE_EYES["blink"])}'
         self.root.title(TURTLE_FACE.format(TURTLE_EYES['sleep'], SLEEP_EFFECT))
+        self.pauseButton['state'] = 'disabled'
 
 
     def handleError(self):
@@ -454,6 +521,7 @@ class SettingsWindow(tk.Tk):
     """
     Settings tkinter window
     """
+
 
     def __init__(self, loop, parent):
         """
@@ -539,6 +607,7 @@ class SettingsWindow(tk.Tk):
         self.parent.settingsWindow = None
         self.withdraw()
 
+
     def loadSettings(self):
         """
         Load settings from config.json into class variables
@@ -556,6 +625,7 @@ class SettingsWindow(tk.Tk):
         self.speedScale.set(self.config.get('speed', 0))
 
         self.fileOverwriteCheckbox.select() if (self.config.get('overwrite', False)) else self.fileOverwriteCheckbox.deselect()
+
 
     def saveSettings(self):
         """
@@ -628,7 +698,6 @@ class SettingsWindow(tk.Tk):
         else:
             self.crfLabel['fg'] = 'red'
 
-
     
     def selectAutorunDirectory(self):
         """
@@ -644,5 +713,3 @@ asyncio.run(App().exec())
 
 # TODO
 # - logging
-# - stats
-# - autorun
