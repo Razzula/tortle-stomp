@@ -44,7 +44,7 @@ class App:
         """
         if (not os.path.exists('config.json')):
             with open('config.json', 'w') as f:
-                json.dump({}, f)
+                json.dump({}, f, indent=4)
 
         self.window = MainWindow(asyncio.get_event_loop())
         await self.window.show()
