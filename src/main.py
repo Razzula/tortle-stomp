@@ -1,6 +1,8 @@
 import asyncio
 import json
+import math
 import os
+import psutil
 import re
 import shutil
 import subprocess
@@ -8,9 +10,8 @@ import sys
 import time
 import tkinter as tk
 import winreg as wr
-from tkinter import filedialog, messagebox, ttk
 from idlelib.tooltip import Hovertip
-import psutil
+from tkinter import filedialog, messagebox, ttk
 
 # SETTINGS
 APPLICATION_NAME = 'tortle-stomp'
@@ -129,7 +130,7 @@ class MainWindow(tk.Tk):
         self.newSizeLabel.grid(row=3, column=4, sticky=tk.W, padx=12, pady=0)
         self.newFileSize = 0
 
-        self.timerLabel = tk.Label(text='0:00:00 | 0:00:00')
+        self.timerLabel = tk.Label(text='0:00:00 | 0.0% | 0:00:00')
         self.timerLabel.grid(row=4, column=2, sticky='EW', padx=0, pady=0)
         self.currentFileTime = 0
         self.currentProcessTime = 0
@@ -203,8 +204,10 @@ class MainWindow(tk.Tk):
                 self.currentFileTime += delta
                 self.currentProcessTime += delta
                 self.timeOfLastCheck = currentTime
+
+                progress = round(self.progressbar['value'], 1)
                 
-                self.timerLabel['text'] = f'{self.formatTime(self.currentProcessTime)} | {self.formatTime(self.currentFileTime)}'
+                self.timerLabel['text'] = f'{self.formatTime(self.currentFileTime)} | {progress}% | {self.formatTime(self.currentProcessTime)}'
 
             await asyncio.sleep(0.5 - (0.45 * (self.speed / 8)))
 
