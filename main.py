@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tkinter as tk
 import winreg as wr
 from tkinter import filedialog, messagebox, ttk
@@ -46,6 +47,9 @@ class App:
             with open('config.json', 'w') as f:
                 json.dump({}, f, indent=4)
 
+        if (not os.path.exists(OUTPUTROOT)):
+            os.mkdir(OUTPUTROOT)
+
         self.window = MainWindow(asyncio.get_event_loop())
         await self.window.show()
 
@@ -79,7 +83,11 @@ class MainWindow(tk.Tk):
         self.root.columnconfigure(0, weight=1)
         self.root.columnconfigure(1, weight=1)
 
-        self.root.iconbitmap(default='null.ico')
+        if (getattr(sys, 'frozen', False)):
+            # bundled
+            self.root.iconbitmap(default=os.path.join(sys._MEIPASS, 'dark.ico'))
+        else:
+            self.root.iconbitmap(default='dark.ico')
         self.root.title(TURTLE_FACE.format(TURTLE_EYES['sleep'], SLEEP_EFFECT))
 
         # CONTROLS
@@ -296,13 +304,7 @@ class MainWindow(tk.Tk):
             
             else:
                 print('DONE')
-                self.statusLabel['text'] = 'DONE :D'
-                self.statusLabel['fg'] = 'green'
-                self.startButton['text'] = 'Start'
-                self.turtleLegs['text'] = ''
-                self.turtleBody['text'] = f'\n{TURTLE_ASCII.format(TURTLE_EYES["blink"])}'
-                self.root.title(TURTLE_FACE.format(TURTLE_EYES['sleep'], SLEEP_EFFECT))
-                self.isAlive = False
+                self.handleDone('DONE :D')
                 return # done
 
             await self.getNextFile()
@@ -390,8 +392,11 @@ class MainWindow(tk.Tk):
             self.loop.create_task(self.getNextFile())
 
         except Exception as e:
-            print(e)
-            self.handleError()
+            if (not self.isAlive):
+                self.handleDone() # error is due to abortion
+            else:
+                print(e)
+                self.handleError()
 
 
     async def handleOutput(self, targetFrames):
@@ -401,7 +406,10 @@ class MainWindow(tk.Tk):
         loop = asyncio.get_event_loop()
 
         while True:
-            line = await loop.run_in_executor(None, self.process.stdout.readline)
+            try:
+                line = await loop.run_in_executor(None, self.process.stdout.readline)
+            except:
+                break
             if not line:
                 break
 
@@ -410,6 +418,20 @@ class MainWindow(tk.Tk):
                 self.progressbar['value'] = (int(match.group(1)) / targetFrames) * 100
 
             await asyncio.sleep(0)
+
+
+    def handleDone(self, message=''):
+        """
+        Display completion in the GUI
+        """
+        self.isAlive = False
+        self.isRunning = False
+        self.statusLabel['text'] = message
+        self.statusLabel['fg'] = 'green'
+        self.startButton['text'] = 'Start'
+        self.turtleLegs['text'] = ''
+        self.turtleBody['text'] = f'\n{TURTLE_ASCII.format(TURTLE_EYES["blink"])}'
+        self.root.title(TURTLE_FACE.format(TURTLE_EYES['sleep'], SLEEP_EFFECT))
 
 
     def handleError(self):
