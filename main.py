@@ -27,7 +27,7 @@ TURTLE_EYES = {
     'sleep': '–',
     'blink': '_'
 }
-TURTLE_FACE = 'tortle-stomp  ({0}\_/{0})  {1}'
+TURTLE_FACE = '({0}\_/{0})  {1}'
 POSES_ASCII = ['|_|_|  |_|_|', '|_|-/  |_|-/', '/-/_|  /-/_|']
 SLEEP_EFFECT = '  ₂ z Z'
 
@@ -79,7 +79,7 @@ class MainWindow(tk.Tk):
         self.root.columnconfigure(0, weight=1)
         self.root.columnconfigure(1, weight=1)
 
-        self.root.wm_attributes('-toolwindow', 'True')
+        self.root.iconbitmap(default='null.ico')
         self.root.title(TURTLE_FACE.format(TURTLE_EYES['sleep'], SLEEP_EFFECT))
 
         # CONTROLS
@@ -445,7 +445,6 @@ class SettingsWindow(tk.Tk):
         # WINDOW
         self.resizable(width=False, height=False)
         self.title('Settings')
-        self.wm_attributes('-toolwindow', 'True')
 
         self.protocol("WM_DELETE_WINDOW", self.onExit)
 
@@ -516,7 +515,7 @@ class SettingsWindow(tk.Tk):
         #     messagebox.showwarning("Warning", "A compression process is currently running. Please abort it for these settings to take effect.")
 
         self.parent.settingsWindow = None
-        self.destroy()
+        self.withdraw()
 
     def loadSettings(self):
         """
