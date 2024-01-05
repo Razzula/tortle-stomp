@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import json
 import math
 import os
@@ -20,6 +21,7 @@ STARTUP_REGISTRY_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
 
 COMPRESSION_TAG = 'ffmpeg'
 OUTPUTROOT = os.path.join(os.path.abspath(os.getcwd()), 'bin')
+LOG_DIR = os.path.join(os.path.abspath(os.getcwd()), 'logs')
 
 # MISC
 COMMENT_TEMPLATE = '{} (-c:v {} -crf {} -preset {} -c:a {} -b:a {})'
@@ -51,6 +53,9 @@ class App:
 
         if (not os.path.exists(OUTPUTROOT)):
             os.mkdir(OUTPUTROOT)
+
+        if (not os.path.exists(LOG_DIR)):
+            os.mkdir(LOG_DIR)
 
         self.window = MainWindow(asyncio.get_event_loop())
         await self.window.show()
@@ -130,7 +135,7 @@ class MainWindow(tk.Tk):
         self.newSizeLabel.grid(row=3, column=4, sticky=tk.W, padx=12, pady=0)
         self.newFileSize = 0
 
-        self.timerLabel = tk.Label(text='0:00:00 | 0.0% | 0:00:00')
+        self.timerLabel = tk.Label(text='0:00:00  |  0.0%  |  0:00:00')
         self.timerLabel.grid(row=4, column=2, sticky='EW', padx=0, pady=0)
         self.currentFileTime = 0
         self.currentProcessTime = 0
@@ -208,7 +213,7 @@ class MainWindow(tk.Tk):
 
                 progress = round(self.progressbar['value'], 1)
                 
-                self.timerLabel['text'] = f'{self.formatTime(self.currentFileTime)} | {progress}% | {self.formatTime(self.currentProcessTime)}'
+                self.timerLabel['text'] = f'{self.formatTime(self.currentFileTime)}  |  {progress}%  |  {self.formatTime(self.currentProcessTime)}'
 
             await asyncio.sleep(0.5 - (0.45 * (self.speed / 8)))
 
@@ -457,11 +462,13 @@ class MainWindow(tk.Tk):
                 else:
                     if (self.overwrite):
                         print(f'\t\tINFO: overwriting source file')
-                        shutil.move(outputFile, inputFile) #TODO this is not working correctly with metadata
+                        shutil.move(outputFile, inputFile)
+                        self.log([inputFile, f'{inputFileSize / 1000000:.2f} MB --> {outputFileSize / 1000000:.2f} MB'])
                     else:
                         print(f'\t\tINFO: saving to output directory')
                         fileName = os.path.basename(file)[:-4] #exclude .mp4
                         shutil.move(outputFile, os.path.join(os.path.dirname(inputFile), f'{fileName} (compressed).mp4'))
+                        self.log([f'{inputFile} (--> ...(compressed))', f'{inputFileSize / 1000000:.2f} MB --> {outputFileSize / 1000000:.2f} MB'])
 
             self.isRunning = False
             self.loop.create_task(self.getNextFile())
@@ -471,6 +478,7 @@ class MainWindow(tk.Tk):
                 self.handleDone() # error is due to abortion
             else:
                 print(e)
+                self.log([inputFile, f'ERROR: {e}'])
                 self.handleError()
 
 
@@ -541,6 +549,18 @@ class MainWindow(tk.Tk):
         self.turtleLegs['fg'] = 'red'
         self.startButton['text'] = 'Start'
         self.pauseButton['state'] = 'disabled'
+
+    
+    def log(self, message):
+        """
+        Log a message to a file
+        """
+        date = datetime.datetime.now()
+        fileName = os.path.join(LOG_DIR, f'{date.strftime("%d-%m-%Y")}.log')
+        with open(fileName, 'a+') as f:
+            f.write(f'{date.strftime("%H:%M:%S")} :\n')
+            for line in message:
+                f.write(f'\t\t{line}\n')
 
 
 class SettingsWindow(tk.Tk):
