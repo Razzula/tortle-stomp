@@ -170,10 +170,11 @@ class MainWindow(tk.Tk):
         self.preset = FFMPEG_SPEEDS[self.speed]
         self.abitrate = config.get('bitrate', '320k')
 
+        self.performanceMode = config.get('performanceMode', 0)
+
         self.compressionComment = COMMENT_TEMPLATE.format(COMPRESSION_TAG, self.vcodec, self.crf, self.preset, self.acodec, self.abitrate)
 
         self.autorun = config.get('autorunPath', None) if (config.get('autorun', False)) else False
-
         self.overwrite = config.get('overwrite', False)
 
 
@@ -257,18 +258,19 @@ class MainWindow(tk.Tk):
         Start the compression process
         """
         # check ffmpeg is installed
-        try:
-            result = subprocess.run(['ffmpeg', '-version'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if (result.returncode != 0):
-                raise Exception(result.returncode)
-        except:
-            messagebox.showerror("Error", "FFmpeg is not installed. Please install it and try again.")
-            return
+        for command in ['ffmpeg', 'ffprobe']:
+            try:
+                result = subprocess.run([command, '-version'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if (result.returncode != 0):
+                    raise Exception(result.returncode)
+            except:
+                messagebox.showerror('Error', f'{command} is not installed. Please install it and try again.')
+                return
         
         # check if settings are valid
         self.loadSettings()
         if (self.overwrite and self.crf > 18): # upper threshold for visually lossless is 18
-            messagebox.showwarning("Warning", "Your current settings will result in a loss of quality! \n\nPlease consider disabling the 'Overwrite source' option or lowering the CRF value.")
+            messagebox.showwarning('Warning', "Your current settings will result in a loss of quality! \n\nPlease consider disabling the 'Overwrite source' option or lowering the CRF value.")
 
         if (filepath):
             # final initialization
@@ -370,6 +372,14 @@ class MainWindow(tk.Tk):
         print(file)
         self.statusLabel['text'] = file
 
+        availableCores =  os.cpu_count()
+        if (self.performanceMode == 0):
+            # background
+            availableCores = 1
+        elif (self.performanceMode == 1):
+            # standard
+            availableCores = max(1, math.floor(availableCores * 0.75))
+
         # trigger GUI handler
         self.isRunning = True
         self.loop.create_task(self.playAnimation())
@@ -412,6 +422,7 @@ class MainWindow(tk.Tk):
                     '-preset', self.preset,
                     '-c:a', self.acodec,       # audio codec
                     '-b:a', self.abitrate,
+                    '-threads', str(availableCores),
                     '-metadata', f'comment={self.compressionComment}',
                     '-x265-params', 'log-level=quiet'
                 ]
@@ -425,6 +436,9 @@ class MainWindow(tk.Tk):
                 cmd.append(outputFile)
 
                 self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True)
+
+                # limit resources
+                self.setProcessPriority(list(range(availableCores)), [psutil.BELOW_NORMAL_PRIORITY_CLASS, psutil.NORMAL_PRIORITY_CLASS, psutil.REALTIME_PRIORITY_CLASS][self.performanceMode])
 
                 # trigger progress handler
                 self.loop.create_task(self.handleOutput(int(metadata['streams'][0]['nb_frames'])))
@@ -458,6 +472,15 @@ class MainWindow(tk.Tk):
             else:
                 print(e)
                 self.handleError()
+
+
+    def setProcessPriority(self, affinity, priority):
+        """
+        Set the priority of the ffmpeg process
+        """
+        if (self.process):
+            psutil.Process(self.process.pid).cpu_affinity(affinity)
+            psutil.Process(self.process.pid).nice(priority)
 
 
     async def handleOutput(self, targetFrames):
@@ -578,20 +601,27 @@ class SettingsWindow(tk.Tk):
         self.speedLabel = tk.Label(self, text='Efficiency:', fg='green')
         self.speedLabel.grid(row=6, column=0, sticky='E', padx=(10, 5), pady=(5, 5))
 
-        self.speedScale = tk.Scale(self, from_=0, to=8, orient=tk.HORIZONTAL, length=200, command=self.handlePresetChange, showvalue=0, label='veryslow')
+        self.speedScale = tk.Scale(self, from_=0, to=8, orient=tk.HORIZONTAL, length=200, command=self.handlePresetChange, showvalue=0, label=FFMPEG_SPEEDS[0])
         Hovertip(self.speedScale,'Level of compression efficiency \n(affects compression speed) \n\n"Use the slowest preset that you have patience for"', hover_delay=200)
         self.speedScale.grid(row=6, column=1, sticky='W', padx=(5, 10), pady=(5, 5))
 
+        self.performanceLabel = tk.Label(self, text='Performance Mode:', fg='red')
+        self.performanceLabel.grid(row=7, column=0, sticky='E', padx=(10, 5), pady=(5, 5))
+
+        self.performanceScale = tk.Scale(self, from_=0, to=2, orient=tk.HORIZONTAL, length=200, command=self.handlePerformanceModeChange, showvalue=0, label='background')
+        Hovertip(self.performanceScale,'Level of resources used by the process \n(affects compression speed)', hover_delay=200)
+        self.performanceScale.grid(row=7, column=1, sticky='W', padx=(5, 10), pady=(5, 5))
+
         # file settings
         self.hr = ttk.Separator(self, orient='horizontal')
-        self.hr.grid(row=7, columnspan=2, sticky='EW', padx=(10, 10), pady=(10, 5))
+        self.hr.grid(row=8, columnspan=2, sticky='EW', padx=(10, 10), pady=(10, 5))
 
         self.fileOverwriteLabel = tk.Label(self, text='Overwrite source:')
-        self.fileOverwriteLabel.grid(row=8, column=0, sticky='E', padx=(10, 5), pady=(5, 5))
+        self.fileOverwriteLabel.grid(row=9, column=0, sticky='E', padx=(10, 5), pady=(5, 5))
 
         self.fileOverwriteCheckbox = tk.Checkbutton(self, variable=tk.IntVar(name='overwrite'), command=lambda: self.handleCheckboxClick(self.fileOverwriteCheckbox, 'overwrite'))
         Hovertip(self.fileOverwriteCheckbox,'Replace original files upon completion? \n(ignored if output is not smaller than source)', hover_delay=200)
-        self.fileOverwriteCheckbox.grid(row=8, column=1, sticky='W', padx=(5, 10), pady=(5, 5))
+        self.fileOverwriteCheckbox.grid(row=9, column=1, sticky='W', padx=(5, 10), pady=(5, 5))
 
         # LOAD SETTINGS
         self.loadSettings()
@@ -626,6 +656,7 @@ class SettingsWindow(tk.Tk):
 
         self.crfScale.set(self.config.get('constant_rate_factor', 0))
         self.speedScale.set(self.config.get('speed', 0))
+        self.performanceScale.set(self.config.get('performanceMode', 0))
 
         self.fileOverwriteCheckbox.select() if (self.config.get('overwrite', False)) else self.fileOverwriteCheckbox.deselect()
 
@@ -700,6 +731,23 @@ class SettingsWindow(tk.Tk):
             self.crfLabel['fg'] = 'orange'
         else:
             self.crfLabel['fg'] = 'red'
+
+
+    def handlePerformanceModeChange(self, value):
+        """
+        Handle performance mode change
+        """
+        value = int(value)
+        self.config['performanceMode'] = value
+
+        self.performanceScale.config(label=['background', 'standard', 'maximum'][value])
+
+        if (value == 0):
+            self.performanceLabel['fg'] = 'red'
+        elif (value == 1):
+            self.performanceLabel['fg'] = 'orange'
+        else:
+            self.performanceLabel['fg'] = 'green'
 
     
     def selectAutorunDirectory(self):
