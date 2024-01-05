@@ -408,11 +408,26 @@ class MainWindow(tk.Tk):
             
             metadata = json.loads(result.stdout)
 
+            shouldCompress = True
             if ((comment := metadata['format']['tags'].get('comment')) != None) and (COMPRESSION_TAG in comment):
                 # already compressed
-                print(f'\t\tINFO: file has already been compressed (skipping)')
+                match = re.search(r'-crf (\d+) -preset (\w+)\)', comment)
 
-            else:
+                if (match):
+                    crf = int(match.group(1))
+                    preset = match.group(2)
+
+                    if ((crf < self.crf) or (FFMPEG_SPEEDS.index(preset) > FFMPEG_SPEEDS.index(self.preset))):
+                        print(f'\t\tINFO: file has already been compressed (trying with more aggressive settings)')
+                    else:
+                        shouldCompress = False
+                        print(f'\t\tINFO: file has already been compressed (skipping)')
+
+                else:
+                    shouldCompress = False
+                    print(f'\t\tINFO: file has already been compressed (skipping)')
+
+            if (shouldCompress):
                 self.originalFileSize = int(metadata['format']['size']) / 1000000
                 self.originalSizeLabel['text'] = f'{self.originalFileSize:.2f} MB'
                 self.newSizeLabel['fg'] = 'green'
