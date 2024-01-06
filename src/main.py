@@ -57,8 +57,14 @@ class App:
         if (not os.path.exists(LOG_DIR)):
             os.mkdir(LOG_DIR)
 
-        self.window = MainWindow(asyncio.get_event_loop())
-        await self.window.show()
+        try:
+            self.window = MainWindow(asyncio.get_event_loop())
+            await self.window.show()
+        except asyncio.CancelledError:
+            pass
+        finally:
+            # Clean up tasks, including subprocesses
+            asyncio.gather(*asyncio.all_tasks(), return_exceptions=True).cancel()
 
 
 class MainWindow(tk.Tk):
@@ -265,7 +271,7 @@ class MainWindow(tk.Tk):
         # check ffmpeg is installed
         for command in ['ffmpeg', 'ffprobe']:
             try:
-                result = subprocess.run([command, '-version'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                result = subprocess.run([command, '-version'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
                 if (result.returncode != 0):
                     raise Exception(result.returncode)
             except:
@@ -455,7 +461,7 @@ class MainWindow(tk.Tk):
                 # output file
                 cmd.append(outputFile)
 
-                self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True)
+                self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True, creationflags=subprocess.CREATE_NO_WINDOW)
 
                 # limit resources
                 self.setProcessPriority(list(range(availableCores)), [psutil.BELOW_NORMAL_PRIORITY_CLASS, psutil.NORMAL_PRIORITY_CLASS, psutil.REALTIME_PRIORITY_CLASS][self.performanceMode])
