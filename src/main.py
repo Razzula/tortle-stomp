@@ -20,7 +20,7 @@ PROGRAM_PATH = os.path.abspath(os.path.join(os.getcwd(), f'{APPLICATION_NAME}.ex
 STARTUP_REGISTRY_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
 
 COMPRESSION_TAG = 'ffmpeg'
-OUTPUTROOT = os.path.join(os.path.abspath(os.getcwd()), 'bin')
+OUTPUTROOT = os.path.join(os.path.abspath(os.getcwd()), 'temp')
 LOG_DIR = os.path.join(os.path.abspath(os.getcwd()), 'logs')
 
 # MISC
@@ -390,7 +390,7 @@ class MainWindow(tk.Tk):
         self.loop.create_task(self.playAnimation())
 
         inputFile = file
-        outputFile = os.path.join(OUTPUTROOT, "temp.mp4")
+        outputFile = os.path.join(OUTPUTROOT, 'data.mp4')
 
         try:
             # READ METADATA
@@ -798,4 +798,4 @@ class SettingsWindow(tk.Tk):
 asyncio.run(App().exec())
 
 # TODO
-# - logging
+# - hardware acceleration https://docs.nvidia.com/video-technologies/video-codec-sdk/12.0/ffmpeg-with-nvidia-gpu/index.html
