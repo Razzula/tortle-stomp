@@ -8,6 +8,8 @@ Automated compression of video files
 Python 3
 `pip install -r requirements.txt`
 
+[ffmpeg](https://ffmpeg.org/) (and ffprobe)
+
 ###  Building
 Use `build.bat`, or build manually with `pyinstaller`
 
