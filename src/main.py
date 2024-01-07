@@ -12,6 +12,7 @@ import time
 import tkinter as tk
 import winreg as wr
 from idlelib.tooltip import Hovertip
+from mutagen.mp4 import MP4
 from tkinter import filedialog, messagebox, ttk
 
 # SETTINGS
@@ -408,7 +409,7 @@ class MainWindow(tk.Tk):
                 '-show_streams',
                 inputFile
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
             if (result.returncode != 0):
                 raise Exception(f'ffprobe failed with code {result.returncode}')
             
@@ -479,6 +480,17 @@ class MainWindow(tk.Tk):
                 if (outputFileSize >= inputFileSize):
                     print(f'\t\tERROR: result is not smaller than source')
                     os.remove(outputFile)
+
+                    try:
+                        sourceMp4 = MP4(inputFile)
+
+                        # Set the comment field to the desired text
+                        sourceMp4['\xa9cmt'] = f'< {self.compressionComment}'  # '\xa9cmt' is the atom for the comment field
+                        sourceMp4.save()
+
+                        print('\tMetadata updated successfully.')
+                    except Exception as e:
+                        print(f"\tError updating metadata: '{e}'")
                 
                 else:
                     if (self.overwrite):
