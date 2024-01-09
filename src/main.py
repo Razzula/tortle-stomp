@@ -21,8 +21,10 @@ PROGRAM_PATH = os.path.abspath(os.path.join(os.getcwd(), f'{APPLICATION_NAME}.ex
 STARTUP_REGISTRY_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
 
 COMPRESSION_TAG = 'ffmpeg'
-OUTPUTROOT = os.path.join(os.path.abspath(os.getcwd()), 'temp')
-LOG_DIR = os.path.join(os.path.abspath(os.getcwd()), 'logs')
+LOCAL_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUTROOT = os.path.join(LOCAL_DIR, 'temp')
+LOG_DIR = os.path.join(LOCAL_DIR, 'logs')
+CONFIG_PATH = os.path.join(LOCAL_DIR, 'config.json')
 
 # MISC
 COMMENT_TEMPLATE = '{} (-c:v {} -crf {} -preset {} -c:a {} -b:a {})'
@@ -48,8 +50,8 @@ class App:
         """
         Start application
         """
-        if (not os.path.exists('config.json')):
-            with open('config.json', 'w') as f:
+        if (not os.path.exists(CONFIG_PATH)):
+            with open(CONFIG_PATH, 'w') as f:
                 json.dump({}, f, indent=4)
 
         if (not os.path.exists(OUTPUTROOT)):
@@ -172,7 +174,7 @@ class MainWindow(tk.Tk):
         Load settings from config.json into class variables
         """
 
-        with open('config.json') as f:
+        with open(CONFIG_PATH) as f:
             config = json.load(f)
 
         self.vcodec = config.get('video_codec', 'libx265')
@@ -699,7 +701,7 @@ class SettingsWindow(tk.Tk):
         Load settings from config.json into class variables
         """
 
-        with open('config.json') as f:
+        with open(CONFIG_PATH) as f:
             self.config = json.load(f)
 
         # READ
@@ -719,7 +721,7 @@ class SettingsWindow(tk.Tk):
         Save settings from class variables into config.json
         """
         
-        with open('config.json', 'w') as f:
+        with open(CONFIG_PATH, 'w') as f:
             json.dump(self.config, f, indent=4, sort_keys=True)
 
         try:
