@@ -17,11 +17,11 @@ from tkinter import filedialog, messagebox, ttk
 
 # SETTINGS
 APPLICATION_NAME = 'tortle-stomp'
-PROGRAM_PATH = os.path.abspath(os.path.join(os.getcwd(), f'{APPLICATION_NAME}.exe'))
+LOCAL_DIR = os.path.abspath(os.getcwd())
+PROGRAM_PATH = os.path.abspath(os.path.join(LOCAL_DIR, f'{APPLICATION_NAME}.exe'))
 STARTUP_REGISTRY_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
 
 COMPRESSION_TAG = 'ffmpeg'
-LOCAL_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUTROOT = os.path.join(LOCAL_DIR, 'temp')
 LOG_DIR = os.path.join(LOCAL_DIR, 'logs')
 CONFIG_PATH = os.path.join(LOCAL_DIR, 'config.json')
@@ -50,6 +50,9 @@ class App:
         """
         Start application
         """
+        print(PROGRAM_PATH)
+
+        print(CONFIG_PATH)
         if (not os.path.exists(CONFIG_PATH)):
             with open(CONFIG_PATH, 'w') as f:
                 json.dump({}, f, indent=4)
