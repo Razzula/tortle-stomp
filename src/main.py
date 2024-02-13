@@ -17,7 +17,7 @@ from tkinter import filedialog, messagebox, ttk
 
 # SETTINGS
 APPLICATION_NAME = 'tortle-stomp'
-LOCAL_DIR = os.path.abspath(os.getcwd())
+LOCAL_DIR = os.path.dirname(sys.executable) if hasattr(sys, '_MEIPASS') else os.path.dirname(__file__)
 PROGRAM_PATH = os.path.abspath(os.path.join(LOCAL_DIR, f'{APPLICATION_NAME}.exe'))
 STARTUP_REGISTRY_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
 
@@ -39,7 +39,10 @@ TURTLE_FACE = '({0}\_/{0})  {1}'
 POSES_ASCII = ['|_|_|  |_|_|', '|_|-/  |_|-/', '/-/_|  /-/_|']
 SLEEP_EFFECT = '  ₂ z Z'
 
-FFMPEG_SPEEDS = ['veryslow', 'slower', 'slow', 'medium', 'fast', 'faster', 'veryfast', 'superfast', 'ultrafast']
+FFMPEG_SPEEDS = {
+    'default': ['veryslow', 'slower', 'slow', 'medium', 'fast', 'faster', 'veryfast', 'superfast', 'ultrafast'],
+    'nvenc': ['slow', 'medium', 'fast']
+}
 
 class App:
     """
@@ -177,22 +180,47 @@ class MainWindow(tk.Tk):
         Load settings from config.json into class variables
         """
 
+        # load data
         with open(CONFIG_PATH) as f:
             config = json.load(f)
 
-        self.vcodec = config.get('video_codec', 'libx265')
+        vcodec = config.get('video_codec', 'h265')
+
         self.acodec = config.get('audio_codec', 'libmp3lame')
         self.crf = config.get('constant_rate_factor', 0)
         self.speed = config.get('speed', 0)
-        self.preset = FFMPEG_SPEEDS[self.speed]
         self.abitrate = config.get('bitrate', '320k')
 
         self.performanceMode = config.get('performanceMode', 0)
 
-        self.compressionComment = COMMENT_TEMPLATE.format(COMPRESSION_TAG, self.vcodec, self.crf, self.preset, self.acodec, self.abitrate)
-
         self.autorun = config.get('autorunPath', None) if (config.get('autorun', False)) else False
         self.overwrite = config.get('overwrite', False)
+
+        # hardware acceleration
+        result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True)
+        nvenc = 'nvenc' in result.stdout
+        if (nvenc):
+            if (vcodec == 'h265'):
+                self.vcodec = 'hevc_nvenc' # NVIDIA NVENC hevc encoder (codec hevc)
+            else:
+                self.vcodec = 'h264_nvenc' # NVIDIA NVENC H.264 encoder (codec h264)
+        else:
+            if (vcodec == 'h265'):
+                self.vcodec = 'libx265' # libx265 H.265 / HEVC (codec hevc)
+            else:
+                self.vcodec = 'libx264' # libx264 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (codec h264)
+
+        result = subprocess.run(['ffmpeg', '-hwaccels'], capture_output=True, text=True)
+        self.cuda = ('cuda' in result.stdout)
+
+        # speed
+        presetConfig = 'nvenc' if nvenc else 'default'
+        speed = round(self.speed / (len(FFMPEG_SPEEDS['default']) - 1) * (len(FFMPEG_SPEEDS[presetConfig]) - 1))
+        self.preset = FFMPEG_SPEEDS[presetConfig][speed]
+
+        # metadata
+        self.compressionComment = COMMENT_TEMPLATE.format(COMPRESSION_TAG, self.vcodec, self.crf, self.preset, self.acodec, self.abitrate)
+
 
 
     def openSettingsWindow(self):
@@ -429,7 +457,7 @@ class MainWindow(tk.Tk):
                     crf = int(match.group(1))
                     preset = match.group(2)
 
-                    if ((crf < self.crf) or (FFMPEG_SPEEDS.index(preset) > FFMPEG_SPEEDS.index(self.preset))):
+                    if ((crf < self.crf) or (FFMPEG_SPEEDS['default'].index(preset) > FFMPEG_SPEEDS['default'].index(self.preset))):
                         print(f'\t\tINFO: file has already been compressed (trying with more aggressive settings)')
                     else:
                         shouldCompress = False
@@ -445,29 +473,41 @@ class MainWindow(tk.Tk):
                 self.newSizeLabel['fg'] = 'green'
 
                 # COMPRESS FILE
-                cmd = [
-                    'ffmpeg',
+                cmd = ['ffmpeg']
+
+                if (self.cuda):
+                    # hardware acceleration
+                    cmd.append('-hwaccel')
+                    cmd.append('cuda')
+
+                for arg in [
                     '-y',
                     '-i', inputFile,
                     '-c:v', self.vcodec,
                     '-crf', str(self.crf),
+                    '-cq', str(self.crf),
+                    '-rc', 'vbr_hq',            # Variable Bit Rate with High Quality mode
+                    '-b:v', '0',                # Set bitrate to 0 for VBR mode
                     '-preset', self.preset,
-                    '-c:a', self.acodec,       # audio codec
+                    '-c:a', self.acodec,        # audio codec
                     '-b:a', self.abitrate,
                     '-threads', str(availableCores),
                     '-metadata', f'comment={self.compressionComment}',
                     '-x265-params', 'log-level=quiet'
-                ]
+                ]:
+                    cmd.append(arg)
 
                 for key, value in metadata['format']['tags'].items():
                     # metadata
                     cmd.append('-metadata')
                     cmd.append(f'{key}={value}')
+                    pass
 
                 # output file
                 cmd.append(outputFile)
 
                 self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                print(' '.join(cmd))
 
                 # limit resources
                 self.setProcessPriority(list(range(availableCores)), [psutil.BELOW_NORMAL_PRIORITY_CLASS, psutil.NORMAL_PRIORITY_CLASS, psutil.REALTIME_PRIORITY_CLASS][self.performanceMode])
@@ -479,6 +519,9 @@ class MainWindow(tk.Tk):
                     await asyncio.sleep(0)
 
                 # HANDLE RESULT
+                if (self.process.returncode != 0):
+                    raise Exception(f'ffmpeg failed with code {self.process.returncode}')
+                
                 inputFileSize = os.path.getsize(file)
                 outputFileSize = os.path.getsize(outputFile)
 
@@ -659,7 +702,7 @@ class SettingsWindow(tk.Tk):
         self.speedLabel = tk.Label(self, text='Efficiency:', fg='green')
         self.speedLabel.grid(row=6, column=0, sticky='E', padx=(10, 5), pady=(5, 5))
 
-        self.speedScale = tk.Scale(self, from_=0, to=8, orient=tk.HORIZONTAL, length=200, command=self.handlePresetChange, showvalue=0, label=FFMPEG_SPEEDS[0])
+        self.speedScale = tk.Scale(self, from_=0, to=8, orient=tk.HORIZONTAL, length=200, command=self.handlePresetChange, showvalue=0, label=FFMPEG_SPEEDS['default'][0])
         Hovertip(self.speedScale,'Level of compression efficiency \n(affects compression speed) \n\n"Use the slowest preset that you have patience for"', hover_delay=200)
         self.speedScale.grid(row=6, column=1, sticky='W', padx=(5, 10), pady=(5, 5))
 
@@ -706,6 +749,8 @@ class SettingsWindow(tk.Tk):
 
         with open(CONFIG_PATH) as f:
             self.config = json.load(f)
+        if (not self.config):
+            self.config = {}
 
         # READ
         self.autorunCheckbox.select() if (self.config.get('autorun', False)) else self.autorunCheckbox.deselect()
@@ -766,7 +811,7 @@ class SettingsWindow(tk.Tk):
         value= int(value)
         self.config['speed'] = value
 
-        self.speedScale.config(label=FFMPEG_SPEEDS[value])
+        self.speedScale.config(label=FFMPEG_SPEEDS['default'][value])
 
         if (value <= 2):
             self.speedLabel['fg'] = 'green'
