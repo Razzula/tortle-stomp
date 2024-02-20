@@ -142,11 +142,11 @@ class MainWindow(tk.Tk):
         self.settingsButton.grid(row=0, column=0, padx=2, pady=0, sticky="w")
 
         # stats
-        self.originalSizeLabel = tk.Label(text='0.00 MB')
+        self.originalSizeLabel = tk.Label(text='0.00 KB')
         self.originalSizeLabel.grid(row=3, column=0, sticky='E', padx=12, pady=0)
         self.originalFileSize = 0
 
-        self.newSizeLabel = tk.Label(text='0.00 MB')
+        self.newSizeLabel = tk.Label(text='0.00 KB')
         self.newSizeLabel.grid(row=3, column=4, sticky=tk.W, padx=12, pady=0)
         self.newFileSize = 0
 
@@ -468,8 +468,21 @@ class MainWindow(tk.Tk):
                     print(f'\t\tINFO: file has already been compressed (skipping)')
 
             if (shouldCompress):
+                originalFileSize = int(metadata['format']['size']) # in bytes
+
+                if (originalFileSize > 10 * 9):
+                    self.originalFileSize = originalFileSize / (10 * 9)
+                    fileSizeLabel = 'GB'
+                elif (originalFileSize > 10 * 6):
+                    self.originalFileSize = originalFileSize / (10 * 6)
+                    fileSizeLabel = 'MB'
+                else:
+                    self.originalFileSize = originalFileSize / 1000
+                    fileSizeLabel = 'KB'
+
                 self.originalFileSize = int(metadata['format']['size']) / 1000000
-                self.originalSizeLabel['text'] = f'{self.originalFileSize:.2f} MB'
+
+                self.originalSizeLabel['text'] = f'{self.originalFileSize:.2f} {fileSizeLabel}'
                 self.newSizeLabel['fg'] = 'green'
 
                 # COMPRESS FILE
@@ -591,8 +604,18 @@ class MainWindow(tk.Tk):
                 self.progressbar['value'] = (int(match.group(1)) / targetFrames) * 100
             match = re.search(r'size=\s*(\d+)kB', line)
             if (match):
-                self.newFileSize = int(match.group(1)) / 1000
-                self.newSizeLabel['text'] = f'{self.newFileSize:.2f} MB\n({int(self.newFileSize / self.originalFileSize * 100)}%)'
+                newFileSize = int(match.group(1)) # in kilobytes
+
+                if (newFileSize > 10 * 6):
+                    self.newFileSize = newFileSize / (10 * 6)
+                    fileSizeLabel = 'GB'
+                elif (newFileSize > 10 * 3):
+                    self.newFileSize = newFileSize / (10 * 3)
+                    fileSizeLabel = 'MB'
+                else:
+                    fileSizeLabel = 'KB'
+
+                self.newSizeLabel['text'] = f'{self.newFileSize:.2f} {fileSizeLabel}\n({int(self.newFileSize / self.originalFileSize * 100)}%)'
 
                 if (self.newFileSize >= self.originalFileSize):
                     pass #TODO skip file
