@@ -14,6 +14,7 @@ import winreg as wr
 from idlelib.tooltip import Hovertip
 from mutagen.mp4 import MP4
 from tkinter import filedialog, messagebox, ttk
+from enum import Enum
 
 # SETTINGS
 APPLICATION_NAME = 'tortle-stomp'
@@ -43,6 +44,11 @@ FFMPEG_SPEEDS = {
     'default': ['veryslow', 'slower', 'slow', 'medium', 'fast', 'faster', 'veryfast', 'superfast', 'ultrafast'],
     'nvenc': ['slow', 'medium', 'fast']
 }
+
+class FileSizeUnit(Enum):
+    KB = 10 ** 3
+    MB = 10 ** 6
+    GB = 10 ** 9
 
 class App:
     """
@@ -470,17 +476,15 @@ class MainWindow(tk.Tk):
             if (shouldCompress):
                 originalFileSize = int(metadata['format']['size']) # in bytes
 
-                if (originalFileSize > 10 * 9):
-                    self.originalFileSize = originalFileSize / (10 * 9)
+                if (originalFileSize > FileSizeUnit.GB.value):
+                    self.originalFileSize = originalFileSize / FileSizeUnit.GB.value
                     fileSizeLabel = 'GB'
-                elif (originalFileSize > 10 * 6):
-                    self.originalFileSize = originalFileSize / (10 * 6)
+                elif (originalFileSize > FileSizeUnit.MB.value):
+                    self.originalFileSize = originalFileSize / FileSizeUnit.MB.value
                     fileSizeLabel = 'MB'
                 else:
-                    self.originalFileSize = originalFileSize / 1000
+                    self.originalFileSize = originalFileSize / FileSizeUnit.KB.value
                     fileSizeLabel = 'KB'
-
-                self.originalFileSize = int(metadata['format']['size']) / 1000000
 
                 self.originalSizeLabel['text'] = f'{self.originalFileSize:.2f} {fileSizeLabel}'
                 self.newSizeLabel['fg'] = 'green'
@@ -604,15 +608,16 @@ class MainWindow(tk.Tk):
                 self.progressbar['value'] = (int(match.group(1)) / targetFrames) * 100
             match = re.search(r'size=\s*(\d+)kB', line)
             if (match):
-                newFileSize = int(match.group(1)) # in kilobytes
+                newFileSize = int(match.group(1)) * 1000 # in bytes
 
-                if (newFileSize > 10 * 6):
-                    self.newFileSize = newFileSize / (10 * 6)
+                if (newFileSize > FileSizeUnit.GB.value):
+                    self.newFileSize = newFileSize / FileSizeUnit.GB.value
                     fileSizeLabel = 'GB'
-                elif (newFileSize > 10 * 3):
-                    self.newFileSize = newFileSize / (10 * 3)
+                elif (newFileSize > FileSizeUnit.MB.value):
+                    self.newFileSize = newFileSize / FileSizeUnit.MB.value
                     fileSizeLabel = 'MB'
                 else:
+                    self.newFileSize = newFileSize / FileSizeUnit.KB.value
                     fileSizeLabel = 'KB'
 
                 self.newSizeLabel['text'] = f'{self.newFileSize:.2f} {fileSizeLabel}\n({int(self.newFileSize / self.originalFileSize * 100)}%)'
