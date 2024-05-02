@@ -479,7 +479,7 @@ class MainWindow(tk.Tk):
                 if (self.originalFileSize > FileSizeUnit.GB.value):
                     originalFileSize = self.originalFileSize / FileSizeUnit.GB.value
                     fileSizeLabel = 'GB'
-                elif (originalFileSize > FileSizeUnit.MB.value):
+                elif (self.originalFileSize > FileSizeUnit.MB.value):
                     originalFileSize = self.originalFileSize / FileSizeUnit.MB.value
                     fileSizeLabel = 'MB'
                 else:
