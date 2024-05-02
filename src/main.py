@@ -3,7 +3,6 @@ import datetime
 import json
 import math
 import os
-import psutil
 import re
 import shutil
 import subprocess
@@ -11,10 +10,12 @@ import sys
 import time
 import tkinter as tk
 import winreg as wr
-from idlelib.tooltip import Hovertip
-from mutagen.mp4 import MP4
-from tkinter import filedialog, messagebox, ttk
 from enum import Enum
+from idlelib.tooltip import Hovertip
+from tkinter import filedialog, messagebox, ttk
+
+import psutil
+from mutagen.mp4 import MP4
 
 # SETTINGS
 APPLICATION_NAME = 'tortle-stomp'
@@ -132,10 +133,10 @@ class MainWindow(tk.Tk):
         # feedback
         self.statusLabel = tk.Label(text='')
         self.statusLabel.grid(row=2, columnspan=5, padx=(8, 8), pady=(0, 0))
-        
+
         self.progressbar = ttk.Progressbar(length=360)
         self.progressbar.grid(row=3, column=1, columnspan=3, padx=(8, 8), pady=(4, 0))
-        
+
         # buttons
         self.startButton = tk.Button(text="Start", width=10, command=lambda: self.loop.create_task(self.handleStartAbortButtonClick()))
         self.startButton.grid(row=4, column=1, sticky='E', padx=0, pady=8)
@@ -203,7 +204,7 @@ class MainWindow(tk.Tk):
         self.overwrite = config.get('overwrite', False)
 
         # hardware acceleration
-        result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True)
+        result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
         nvenc = 'nvenc' in result.stdout
         if (nvenc):
             if (vcodec == 'h265'):
@@ -216,7 +217,7 @@ class MainWindow(tk.Tk):
             else:
                 self.vcodec = 'libx264' # libx264 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (codec h264)
 
-        result = subprocess.run(['ffmpeg', '-hwaccels'], capture_output=True, text=True)
+        result = subprocess.run(['ffmpeg', '-hwaccels'], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
         self.cuda = ('cuda' in result.stdout)
 
         # speed
@@ -226,7 +227,6 @@ class MainWindow(tk.Tk):
 
         # metadata
         self.compressionComment = COMMENT_TEMPLATE.format(COMPRESSION_TAG, self.vcodec, self.crf, self.preset, self.acodec, self.abitrate)
-
 
 
     def openSettingsWindow(self):
@@ -242,7 +242,7 @@ class MainWindow(tk.Tk):
             self.settingsWindow = SettingsWindow(self.loop, self)
 
 
-    async def playAnimation(self): 
+    async def playAnimation(self):
         """
         Play the turtle animation
         """
@@ -258,7 +258,7 @@ class MainWindow(tk.Tk):
                 self.timeOfLastCheck = currentTime
 
                 progress = round(self.progressbar['value'], 1)
-                
+
                 self.timerLabel['text'] = f'{self.formatTime(self.currentFileTime)}  |  {progress}%  |  {self.formatTime(self.currentProcessTime)}'
 
             await asyncio.sleep(0.5 - (0.45 * (self.speed / 8)))
@@ -280,7 +280,7 @@ class MainWindow(tk.Tk):
         Trigger the process automatically if autorun is enabled
         """
         self.loadSettings()
-        
+
         if (self.autorun):
             self.beginProcess(self.autorun)
 
@@ -317,7 +317,7 @@ class MainWindow(tk.Tk):
             except:
                 messagebox.showerror('Error', f'{command} is not installed. Please install it and try again.')
                 return
-        
+
         # check if settings are valid
         self.loadSettings()
         if (self.overwrite and self.crf > 18): # upper threshold for visually lossless is 18
@@ -350,7 +350,7 @@ class MainWindow(tk.Tk):
     async def handlePlayPauseButtonClick(self):
         """
         Pause or resume the compression process
-        """ 
+        """
         if (self.process):
             if (self.isRunning):
                 # pause
@@ -382,10 +382,10 @@ class MainWindow(tk.Tk):
 
         self.startButton['text'] = 'Abort'
         self.currentFileTime = 0
-        
+
         if (len(self.fileStack) > 0):
             # process files
-            
+
             file = self.fileStack.pop()
             self.loop.create_task(self.compressFile(file))
 
@@ -396,7 +396,7 @@ class MainWindow(tk.Tk):
                 for dir in os.listdir(currentDirectory):
 
                     fullPath = os.path.join(currentDirectory, dir)
-                    
+
                     # get future directories
                     if (os.path.isdir(fullPath)):
                         self.directoryStack.append(fullPath)
@@ -406,7 +406,7 @@ class MainWindow(tk.Tk):
                         # only process mp4 files
                         if (fullPath.endswith('.mp4')):
                             self.fileStack.append(fullPath)
-            
+
             else:
                 print('DONE')
                 self.handleDone('DONE :D')
@@ -419,7 +419,7 @@ class MainWindow(tk.Tk):
         """
         Compress a single file using ffmpeg
         """
-        
+
         print(file)
         self.statusLabel['text'] = file
 
@@ -451,7 +451,7 @@ class MainWindow(tk.Tk):
             result = subprocess.run(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
             if (result.returncode != 0):
                 raise Exception(f'ffprobe failed with code {result.returncode}')
-            
+
             metadata = json.loads(result.stdout)
 
             shouldCompress = True
@@ -474,19 +474,19 @@ class MainWindow(tk.Tk):
                     print(f'\t\tINFO: file has already been compressed (skipping)')
 
             if (shouldCompress):
-                originalFileSize = int(metadata['format']['size']) # in bytes
+                self.originalFileSize = int(metadata['format']['size']) # in bytes
 
-                if (originalFileSize > FileSizeUnit.GB.value):
-                    self.originalFileSize = originalFileSize / FileSizeUnit.GB.value
+                if (self.originalFileSize > FileSizeUnit.GB.value):
+                    originalFileSize = self.originalFileSize / FileSizeUnit.GB.value
                     fileSizeLabel = 'GB'
                 elif (originalFileSize > FileSizeUnit.MB.value):
-                    self.originalFileSize = originalFileSize / FileSizeUnit.MB.value
+                    originalFileSize = self.originalFileSize / FileSizeUnit.MB.value
                     fileSizeLabel = 'MB'
                 else:
-                    self.originalFileSize = originalFileSize / FileSizeUnit.KB.value
+                    originalFileSize = self.originalFileSize / FileSizeUnit.KB.value
                     fileSizeLabel = 'KB'
 
-                self.originalSizeLabel['text'] = f'{self.originalFileSize:.2f} {fileSizeLabel}'
+                self.originalSizeLabel['text'] = f'{originalFileSize:.2f} {fileSizeLabel}'
                 self.newSizeLabel['fg'] = 'green'
 
                 # COMPRESS FILE
@@ -538,7 +538,7 @@ class MainWindow(tk.Tk):
                 # HANDLE RESULT
                 if (self.process.returncode != 0):
                     raise Exception(f'ffmpeg failed with code {self.process.returncode}')
-                
+
                 inputFileSize = os.path.getsize(file)
                 outputFileSize = os.path.getsize(outputFile)
 
@@ -556,7 +556,7 @@ class MainWindow(tk.Tk):
                         print('\tMetadata updated successfully.')
                     except Exception as e:
                         print(f"\tError updating metadata: '{e}'")
-                
+
                 else:
                     if (self.overwrite):
                         print(f'\t\tINFO: overwriting source file')
@@ -608,19 +608,19 @@ class MainWindow(tk.Tk):
                 self.progressbar['value'] = (int(match.group(1)) / targetFrames) * 100
             match = re.search(r'size=\s*(\d+)kB', line)
             if (match):
-                newFileSize = int(match.group(1)) * 1000 # in bytes
+                self.newFileSize = int(match.group(1)) * 1000 # in bytes
 
-                if (newFileSize > FileSizeUnit.GB.value):
-                    self.newFileSize = newFileSize / FileSizeUnit.GB.value
+                if (self.newFileSize > FileSizeUnit.GB.value):
+                    newFileSize = self.newFileSize / FileSizeUnit.GB.value
                     fileSizeLabel = 'GB'
-                elif (newFileSize > FileSizeUnit.MB.value):
-                    self.newFileSize = newFileSize / FileSizeUnit.MB.value
+                elif (self.newFileSize > FileSizeUnit.MB.value):
+                    newFileSize = self.newFileSize / FileSizeUnit.MB.value
                     fileSizeLabel = 'MB'
                 else:
-                    self.newFileSize = newFileSize / FileSizeUnit.KB.value
+                    newFileSize = self.newFileSize / FileSizeUnit.KB.value
                     fileSizeLabel = 'KB'
 
-                self.newSizeLabel['text'] = f'{self.newFileSize:.2f} {fileSizeLabel}\n({int(self.newFileSize / self.originalFileSize * 100)}%)'
+                self.newSizeLabel['text'] = f'{newFileSize:.2f} {fileSizeLabel}\n({int(self.newFileSize / self.originalFileSize * 100)}%)'
 
                 if (self.newFileSize >= self.originalFileSize):
                     pass #TODO skip file
@@ -659,7 +659,7 @@ class MainWindow(tk.Tk):
         self.startButton['text'] = 'Start'
         self.pauseButton['state'] = 'disabled'
 
-    
+
     def log(self, message):
         """
         Log a message to a file
@@ -762,7 +762,7 @@ class SettingsWindow(tk.Tk):
         """
 
         self.saveSettings()
-        
+
         # if (self.parent.isAlive):
         #     messagebox.showwarning("Warning", "A compression process is currently running. Please abort it for these settings to take effect.")
 
@@ -796,7 +796,7 @@ class SettingsWindow(tk.Tk):
         """
         Save settings from class variables into config.json
         """
-        
+
         with open(CONFIG_PATH, 'w') as f:
             json.dump(self.config, f, indent=4, sort_keys=True)
 
@@ -814,7 +814,7 @@ class SettingsWindow(tk.Tk):
         except Exception as e:
             print(f"Error: {e}")
 
-    
+
     def setAutorunDirectory(self, directory):
         """
         Set the autorun directory
@@ -831,7 +831,7 @@ class SettingsWindow(tk.Tk):
         """
         self.config[variable] = int(checkbox.getvar(variable))
 
-    
+
     def handlePresetChange(self, value):
         """
         Handle preset change
@@ -880,7 +880,7 @@ class SettingsWindow(tk.Tk):
         else:
             self.performanceLabel['fg'] = 'green'
 
-    
+
     def selectAutorunDirectory(self):
         """
         Handle autorun directory selection
@@ -892,6 +892,3 @@ class SettingsWindow(tk.Tk):
 
 
 asyncio.run(App().exec())
-
-# TODO
-# - hardware acceleration https://docs.nvidia.com/video-technologies/video-codec-sdk/12.0/ffmpeg-with-nvidia-gpu/index.html
