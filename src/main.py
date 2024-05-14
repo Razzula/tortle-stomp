@@ -404,7 +404,7 @@ class MainWindow(tk.Tk):
                     # get files
                     else:
                         # only process mp4 files
-                        if (fullPath.endswith('.mp4')):
+                        if (fullPath.lower().endswith('.mp4')):
                             self.fileStack.append(fullPath)
 
             else:
